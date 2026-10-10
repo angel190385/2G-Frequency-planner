@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freq Planner 2G — Planificador y Optimizador de Frecuencias GSM</title>
+    <meta name="description" content="Herramienta avanzada de planificación y optimización de frecuencias GSM 2G con algoritmos genéticos, gestión de espectro, modelos estadísticos de tráfico e informes dinámicos.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-body: #0b0f17;
+            --bg-surface: #111722;
+            --bg-card: #182232;
+            --bg-card-hover: #1f2c40;
+            --border: #233147;
+            --border-subtle: #192434;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --primary: #00d4aa;
+            --primary-glow: rgba(0, 212, 170, 0.25);
+            --primary-dark: #00a884;
+            --accent-cyan: #38bdf8;
+            --accent-purple: #a855f7;
+            --accent-orange: #fb923c;
+            --danger: #f43f5e;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --radius-sm: 8px;
+            --radius-md: 14px;
+            --radius-lg: 20px;
+            --radius-full: 9999px;
+            --shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-card: #f1f5f9;
+            --bg-card-hover: #e2e8f0;
+            --border: #cbd5e1;
+            --border-subtle: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-dim: #94a3b8;
+            --primary: #0d9488;
+            --primary-glow: rgba(13, 148, 136, 0.2);
+            --primary-dark: #0f766e;
+            --accent-cyan: #0284c7;
+            --accent-purple: #9333ea;
+            --accent-orange: #ea580c;
+            --danger: #e11d48;
+            --warning: #d97706;
+            --success: #059669;
+            --shadow: 0 20px 35px -15px rgba(0, 0, 0, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scroll-behavior: smooth;
+            transition: background-color 0.25s ease, border-color 0.25s ease;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Ambient Glow Background */
+        .ambient-glow {
+            position: fixed;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1000px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(0, 212, 170, 0.08) 0%, rgba(56, 189, 248, 0.05) 50%, transparent 80%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 0 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Navigation Bar */
+        nav {
+            position: sticky;
+            top: 16px;
+            z-index: 100;
+            background: rgba(17, 23, 34, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            margin: 16px auto 32px auto;
+            max-width: 1240px;
+            padding: 14px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+        }
+
+        [data-theme="light"] nav {
+            background: rgba(255, 255, 255, 0.85);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .brand-icon {
+            font-size: 24px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-main);
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--primary);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: #07251e;
+            border: none;
+            font-weight: 700;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #2bfad2 0%, #00b890 100%);
+            color: #041a15;
+            box-shadow: 0 6px 20px rgba(0, 212, 170, 0.4);
+        }
+
+        /* Hero Section */
+        .hero {
+            padding: 64px 0 48px 0;
+            text-align: center;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid rgba(0, 212, 170, 0.3);
+            color: var(--primary);
+            padding: 6px 16px;
+            border-radius: var(--radius-full);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 54px;
+            font-weight: 900;
+            line-height: 1.15;
+            letter-spacing: -1.5px;
+            margin-bottom: 20px;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #ffffff 20%, var(--primary) 60%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        [data-theme="light"] .gradient-text {
+            background: linear-gradient(135deg, #0f172a 20%, var(--primary) 60%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            font-size: 18px;
+            color: var(--text-muted);
+            max-width: 780px;
+            margin: 0 auto 36px auto;
+        }
+
+        .hero-cta {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 54px;
+        }
+
+        .hero-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+
+        .stat-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--primary);
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* Section Generic */
+        section {
+            padding: 64px 0;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .section-tag {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 34px;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            margin-bottom: 12px;
+        }
+
+        .section-desc {
+            font-size: 16px;
+            color: var(--text-muted);
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        /* Feature Cards Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 24px;
+        }
+
+        .feature-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 28px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+            background: rgba(0, 212, 170, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(0, 212, 170, 0.25);
+        }
+
+        .feature-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .feature-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* Interactive Statistical Models Showcase */
+        .model-showcase {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            box-shadow: var(--shadow);
+        }
+
+        .model-tabs {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 16px;
+        }
+
+        .model-tab-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 8px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .model-tab-btn:hover {
+            color: var(--text-main);
+            border-color: var(--primary);
+        }
+
+        .model-tab-btn.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: #07251e;
+            border-color: transparent;
+            font-weight: 700;
+        }
+
+        .model-details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+            align-items: center;
+        }
+
+        @media (max-width: 900px) {
+            .model-details-grid { grid-template-columns: 1fr; }
+            .hero-stats { grid-template-columns: repeat(2, 1fr); }
+            .hero h1 { font-size: 38px; }
+        }
+
+        .formula-display {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 15px;
+            color: var(--accent-cyan);
+            margin: 16px 0;
+        }
+
+        /* Interactive Simulator Box */
+        .simulator-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 24px;
+        }
+
+        .slider-group {
+            margin: 18px 0;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--primary);
+        }
+
+        .calculated-weight {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 14px;
+            text-align: center;
+            margin-top: 16px;
+        }
+
+        .calculated-weight-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--primary);
+        }
+
+        /* Code Block & Quickstart */
+        .code-window {
+            background: #0d131f;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            margin: 20px 0;
+        }
+
+        .code-header {
+            background: #080c14;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 12px;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .code-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .dot-red { background: #f43f5e; }
+        .dot-yellow { background: #f59e0b; }
+        .dot-green { background: #10b981; }
+
+        pre {
+            padding: 20px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #e2e8f0;
+        }
+
+        .comment { color: #64748b; }
+        .keyword { color: #38bdf8; }
+        .cmd { color: #00d4aa; }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid var(--border-subtle);
+            padding: 48px 0;
+            text-align: center;
+            font-size: 14px;
+            color: var(--text-dim);
+        }
+
+        footer a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        footer a:hover {
+            color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<div class="container">
+    <!-- Navbar -->
+    <nav>
+        <a href="#" class="brand">
+            <span class="brand-icon">📡</span>
+            <span>Freq Planner 2G</span>
+        </a>
+        <ul class="nav-links">
+            <li><a href="#features">Características</a></li>
+            <li><a href="#models">Modelos Estadísticos</a></li>
+            <li><a href="#dashboard">Dashboard HTML</a></li>
+            <li><a href="#quickstart">Inicio Rápido</a></li>
+        </ul>
+        <div class="nav-actions">
+            <button class="btn" onclick="toggleTheme()" title="Cambiar Tema">🌓 Tema</button>
+            <a href="https://github.com/angel190385/2G-Frequency-planner" target="_blank" class="btn btn-primary">⭐ GitHub Repo</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="hero-badge">
+            <span>🚀 Optimización de Frecuencias GSM 2G con IA & Algoritmos Genéticos</span>
+        </div>
+        <h1>
+            Planificación Óptima de Redes 2G<br>
+            <span class="gradient-text">Sin Interferencias y Guiada por Datos</span>
+        </h1>
+        <p>
+            Suite profesional de ingeniería de radiofrecuencia diseñada para resolver el problema NP-hard
+            de asignación espectral en redes celulares GSM. Elimina cocanalidades y adyacencias mediante
+            algoritmos genéticos multi-población, adaptación dinámica de espectro e informes dinámicos de nueva generación.
+        </p>
+
+        <div class="hero-cta">
+            <a href="#quickstart" class="btn btn-primary" style="padding: 12px 24px; font-size: 15px;">⚡ Comenzar Ahora</a>
+            <a href="../test_data/informe_comparativo_ejemplo.html" target="_blank" class="btn" style="padding: 12px 24px; font-size: 15px;">🌐 Explorar Demo del Dashboard</a>
+            <a href="https://github.com/angel190385/2G-Frequency-planner" target="_blank" class="btn" style="padding: 12px 24px; font-size: 15px;">📦 Código Fuente</a>
+        </div>
+
+        <div class="hero-stats">
+            <div class="stat-card">
+                <div class="stat-number">NP-Hard</div>
+                <div class="stat-label">Complejidad Resuelta con Heurísticas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">5 Modelos</div>
+                <div class="stat-label">Ponderación Estadística de Handovers</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">BCCH + TCH</div>
+                <div class="stat-label">Detección Global de Espectro</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">100% Offline</div>
+                <div class="stat-label">Dashboard Dinámico sin Servidor</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Key Features Section -->
+    <section id="features">
+        <div class="section-header">
+            <div class="section-tag">Capacidades del Sistema</div>
+            <h2 class="section-title">Arquitectura Diseñada para Operadores y Radioingenieros</h2>
+            <p class="section-desc">
+                Herramientas avanzadas integradas para modelar, diagnosticar, calcular y supervisar la red móvil celular.
+            </p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🧬</div>
+                <h3 class="feature-title">Algoritmo Genético Multi-Ejecución</h3>
+                <p class="feature-desc">
+                    Evolución simultánea mediante operadores genéticos adaptativos: selección por torneo, mutación guiada únicamente en las celdas marcadas para recálculo, cruce por bloques de estación y elitismo para conservar el mejor plan global.
+                </p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📻</div>
+                <h3 class="feature-title">Reconfiguración de Espectro (Autofreq)</h3>
+                <p class="feature-desc">
+                    Transición fluida ante reasignaciones de espectro regulatorio. Detecta canales en uso (tanto BCCH como todos los TCH), sustituye heurísticamente frecuencias que desaparecen y aprovecha nuevos canales disponibles para desatascar la red.
+                </p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📐</div>
+                <h3 class="feature-title">Modelos Estadísticos de Traspaso</h3>
+                <p class="feature-desc">
+                    Flexibilidad para ponderar la severidad de las interferencias según el tráfico real. Selecciona entre formulaciones Logarítmica, Lineal Normalizada, Sigmoide, Exponencial/Pareto y Clásica según el perfil de la red (urbana, hotspot o rural).
+                </p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">Análisis Agregado por Canal (ARFCN)</h3>
+                <p class="feature-desc">
+                    Gráfica de barras interactiva en HTML5 Canvas para supervisar la carga espectral. Visualiza coincidencias totales, portadoras BCCH, tráfico TCH o conflictos por frecuencia, con inspector de celdas en tiempo real.
+                </p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h3 class="feature-title">Dashboard HTML Interactivo (3 Escenarios)</h3>
+                <p class="feature-desc">
+                    Sustitución completa del informe PDF estático por un dashboard dinámico, moderno y ligero con selector de tema, alternancia en vivo entre escenarios, matriz comparativa con % de mejora y filtros de celdas modificadas.
+                </p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🗺️</div>
+                <h3 class="feature-title">Visualización GIS y Mapa Sectorial</h3>
+                <p class="feature-desc">
+                    Mapa de frecuencias interactivo con representación geométrica de estaciones base y acimuts de sector, identificando visualmente grupos de reutilización y riesgos de interferencia cocanal.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Statistical Models Section -->
+    <section id="models">
+        <div class="section-header">
+            <div class="section-tag">Fundamentación Matemática</div>
+            <h2 class="section-title">Modelos Estadísticos para Ponderación de Pesos</h2>
+            <p class="section-desc">
+                Comprende y simula en tiempo real cómo impacta cada modelo en la penalización de interferencias entre celdas vecinas.
+            </p>
+        </div>
+
+        <div class="model-showcase">
+            <div class="model-tabs" id="model-tabs">
+                <button class="model-tab-btn active" onclick="selectModel('logarithmic')">1. Logarítmico (Recomendado)</button>
+                <button class="model-tab-btn" onclick="selectModel('linear_normalized')">2. Lineal Normalizado</button>
+                <button class="model-tab-btn" onclick="selectModel('sigmoid')">3. Sigmoide (Curva S)</button>
+                <button class="model-tab-btn" onclick="selectModel('exponential_pareto')">4. Exponencial / Pareto 80-20</button>
+                <button class="model-tab-btn" onclick="selectModel('uniform')">5. Uniforme / Clásico</button>
+            </div>
+
+            <div class="model-details-grid">
+                <div>
+                    <h3 id="model-name" style="font-family: 'Outfit', sans-serif; font-size: 22px; font-weight: 700; color: var(--primary);">Modelo Logarítmico</h3>
+                    <div class="formula-display" id="model-formula">w(HO) = log₂(1 + HO)</div>
+                    <p id="model-desc" style="color: var(--text-muted); font-size: 14px; margin-bottom: 12px; line-height: 1.6;">
+                        Comprime la varianza extrema del tráfico de handovers mediante compresión sublineal logarítmica. Evita que un par de celdas muy transitadas monopolice el cálculo de la función de coste.
+                    </p>
+                    <div style="background: var(--bg-card); padding: 12px 16px; border-radius: var(--radius-sm); border-left: 3px solid var(--accent-cyan);">
+                        <strong style="font-size: 12px; text-transform: uppercase; color: var(--accent-cyan); display: block; margin-bottom: 4px;">Criterio de Uso Óptimo</strong>
+                        <span id="model-usage" style="font-size: 13px; color: var(--text-main);">Ideal para redes GSM urbanas estándar con tráfico heterogéneo y topología celular densa.</span>
+                    </div>
+                </div>
+
+                <div class="simulator-box">
+                    <h4 style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">🧪 Simulador Interactivo de Peso</h4>
+                    <p style="font-size: 12px; color: var(--text-muted);">Mueve el deslizador de handovers para calcular el peso en vivo:</p>
+
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Contador de Handovers (HO):</span>
+                            <span id="slider-val" class="font-mono" style="color: var(--primary); font-weight: bold;">50</span>
+                        </div>
+                        <input type="range" id="ho-slider" min="0" max="500" value="50" oninput="updateSimulation()">
+                    </div>
+
+                    <div class="calculated-weight">
+                        <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Factor de Peso Resultante w(HO)</div>
+                        <div class="calculated-weight-val" id="sim-result">5.67</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Preview Section -->
+    <section id="dashboard">
+        <div class="section-header">
+            <div class="section-tag">Supervisión e Informes</div>
+            <h2 class="section-title">Dashboard HTML Dinámico Integrado</h2>
+            <p class="section-desc">
+                Visualización ejecutiva y técnica con conmutación instantánea entre el plan actual y las 3 mejores alternativas calculadas.
+            </p>
+        </div>
+
+        <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; text-align: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                <div style="text-align: left;">
+                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 700;">Vista Previa del Dashboard Interactivo</h3>
+                    <p style="font-size: 13px; color: var(--text-muted);">Acceso directo al informe autocontenido con gráfica agregada por ARFCN.</p>
+                </div>
+                <a href="../test_data/informe_comparativo_ejemplo.html" target="_blank" class="btn btn-primary">Abrir en Nueva Pestaña ↗</a>
+            </div>
+
+            <div style="border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); box-shadow: var(--shadow);">
+                <iframe src="../test_data/informe_comparativo_ejemplo.html" style="width: 100%; height: 540px; border: none; display: block;" title="Dashboard Preview"></iframe>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quickstart Section -->
+    <section id="quickstart">
+        <div class="section-header">
+            <div class="section-tag">Despliegue Rápido</div>
+            <h2 class="section-title">Instalación y Ejecución en 3 Pasos</h2>
+            <p class="section-desc">
+                Desarrollado en Python 3 puro con PyQt6. Totalmente compatible con Windows, macOS y Linux.
+            </p>
+        </div>
+
+        <div class="code-window">
+            <div class="code-header">
+                <span class="code-dot dot-red"></span>
+                <span class="code-dot dot-yellow"></span>
+                <span class="code-dot dot-green"></span>
+                <span>bash — Clonar y Ejecutar</span>
+            </div>
+            <pre><code><span class="comment"># 1. Clonar el repositorio</span>
+<span class="cmd">git clone</span> https://github.com/angel190385/2G-Frequency-planner.git
+<span class="cmd">cd</span> 2G-Frequency-planner
+
+<span class="comment"># 2. Instalar dependencias requeridas</span>
+<span class="cmd">pip install</span> -r requirements.txt
+
+<span class="comment"># 3. Lanzar la aplicación gráfica de escritorio</span>
+<span class="cmd">python</span> main.py
+
+<span class="comment"># (Opcional) Ejecutar suite completa de tests automatizados</span>
+<span class="cmd">python</span> -m unittest discover tests</code></pre>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p style="margin-bottom: 8px;">
+            <strong>Freq Planner 2G</strong> — Herramienta de Planificación y Optimización de Espectro GSM
+        </p>
+        <p>
+            Código abierto bajo licencia MIT • Desarrollado por <a href="https://github.com/angel190385" target="_blank">angel190385</a>
+        </p>
+    </footer>
+</div>
+
+<script>
+    const modelsData = {
+        logarithmic: {
+            name: "1. Modelo Logarítmico (Recomendado)",
+            formula: "w(HO) = log₂(1 + HO)",
+            desc: "Comprime la varianza del tráfico de traspasos sublinealmente. Evita que uno o dos pares de celdas con cientos de handovers dominen por completo la función de coste, protegiendo las celdas residenciales o de menor tráfico.",
+            usage: "Estándar recomendado para redes GSM mixtas y urbanas densas.",
+            calc: (ho) => Math.log2(1 + ho)
+        },
+        linear_normalized: {
+            name: "2. Modelo Lineal Normalizado",
+            formula: "w(HO) = 1.0 + (HO / HO_media)",
+            desc: "Asigna un peso directamente proporcional al tráfico de traspasos comparado con el promedio de la red. Cada traspaso incrementa el coste de forma lineal y predecible.",
+            usage: "Recomendado cuando el tráfico de traspaso está distribuido homogéneamente.",
+            calc: (ho) => 1.0 + (ho / 50.0)
+        },
+        sigmoid: {
+            name: "3. Modelo Sigmoide (Curva S)",
+            formula: "w(HO) = 1.0 / (1 + exp(-k · (HO - HO_mediana))) · 10.0",
+            desc: "Función logística centrada en la mediana del tráfico de la red. Penaliza drásticamente cuando los handovers superan un umbral crítico de congestión.",
+            usage: "Ideal para redes con umbrales definidos de calidad de servicio (QoS/QoE).",
+            calc: (ho) => (1.0 / (1.0 + Math.exp(-0.05 * (ho - 50.0)))) * 10.0
+        },
+        exponential_pareto: {
+            name: "4. Modelo Exponencial / Pareto (80/20)",
+            formula: "w(HO) = 1.0 + 9.0 · (HO / HO_max)^1.5",
+            desc: "Aplica el principio de Pareto potenciando de forma exponencial el 20% de las adyacencias que concentran el 80% del tráfico y llamadas caídas.",
+            usage: "Excelente para desatascar hotspots críticos y arterias viales prioritarias.",
+            calc: (ho) => 1.0 + 9.0 * Math.pow(ho / 200.0, 1.5)
+        },
+        uniform: {
+            name: "5. Modelo Uniforme / Clásico",
+            formula: "w(HO) = 1.0 (Constante)",
+            desc: "Trata todas las relaciones de adyacencia de forma idéntica, ignorando el volumen de handovers. Optimiza estrictamente la topología pura de la red.",
+            usage: "Útil en fases preliminares de diseño o cuando no se dispone de matrices de tráfico.",
+            calc: () => 1.0
+        }
+    };
+
+    let activeModel = 'logarithmic';
+
+    function selectModel(key) {
+        activeModel = key;
+        const m = modelsData[key];
+        document.getElementById('model-name').innerText = m.name;
+        document.getElementById('model-formula').innerText = m.formula;
+        document.getElementById('model-desc').innerText = m.desc;
+        document.getElementById('model-usage').innerText = m.usage;
+
+        document.querySelectorAll('.model-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('onclick').includes(key));
+        });
+
+        updateSimulation();
+    }
+
+    function updateSimulation() {
+        const ho = parseFloat(document.getElementById('ho-slider').value);
+        document.getElementById('slider-val').innerText = ho;
+        const m = modelsData[activeModel];
+        const res = m.calc(ho);
+        document.getElementById('sim-result').innerText = res.toFixed(2);
+    }
+
+    function toggleTheme() {
+        const html = document.documentElement;
+        const current = html.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+    }
+
+    // Init
+    updateSimulation();
+</script>
+</body>
+</html>

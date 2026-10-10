@@ -16,11 +16,15 @@ Herramienta avanzada para la planificación y optimización de frecuencias GSM 2
   - **Sigmoide / Curva en S**: Función logística centrada en la mediana, con alta sensibilidad ante umbrales críticos de tráfico.
   - **Exponencial / Pareto (80/20)**: Prioridad máxima a los principales hotspots y ejes de tráfico de la red.
   - **Uniforme / Clásico**: Tratamiento topológico equitativo sin ponderación de contadores de traspaso.
-- **Informes Ejecutivos en PDF con Comparativa de 3 Escenarios**:
-  - Exportación de informes completos en PDF.
-  - Tabla comparativa entre el **Plan Actual (Original)** y hasta **3 Escenarios Calculados** (Score, violaciones críticas BCCH-BCCH, violaciones totales, cocanalidades/adyacencias ponderadas por HO y % de mejora).
+- **Dashboard e Informes Dinámicos HTML (3 Escenarios)**:
+  - Generación de informes modernos e interactivos en formato HTML autocontenido (sin dependencias externas).
+  - Selector en vivo para alternar entre el **Plan Actual (Original)** y hasta **3 Escenarios Calculados** (Score de coste, violaciones críticas BCCH-BCCH, violaciones totales, cocanalidades/adyacencias ponderadas por HO y % de mejora).
+  - **Gráfica de barras interactiva por canal (ARFCN)** en HTML5 Canvas con desglose de portadoras BCCH, tráfico TCH, conflictos y buscador/inspector de celdas asignadas.
   - Explicación metodológica de los modelos estadísticos empleados.
-  - Detalle completo de asignaciones por celda (Antes vs Después) y relaciones críticas residuales.
+  - Detalle completo de asignaciones por celda (Antes vs Después) con buscador y filtro de celdas modificadas en vivo.
+  - Exportación directa a CSV y modo de impresión optimizado.
+- **Página de Documentación Web para GitHub**:
+  - Landing page profesional con simulador interactivo de pesos estadísticos en [`docs/index.html`](docs/index.html).
 - **Gestión Integral de Red y Visualización**:
   - Matrices de vecindades y contadores de handovers.
   - Mapa interactivo de frecuencias y sectores.
