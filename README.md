@@ -105,12 +105,12 @@ Para evitar que celdas con alto tráfico monopolicen la penalización o que rela
 
 ## 🌐 Dashboard HTML Dinámico Interactivo
 
-Se ha reemplazado el tradicional informe estático en PDF por un **Dashboard Web dinámico, interactivo y 100% autocontenido** ([`src/io/html_exporter.py`](src/io/html_exporter.py)):
+Dashboard Web dinámico, interactivo y 100% autocontenido ([`src/io/html_exporter.py`](src/io/html_exporter.py)):
 
 ### Capacidades Destacadas:
 - 🌓 **Selector de Tema Claro / Oscuro**: Adaptación visual instantánea con paleta moderna y tipografías *Google Fonts*.
 - ⚖️ **Comparador de Escenarios en Vivo**: Tarjetas conmutables para el **Plan Actual (Línea Base)** y hasta **3 Escenarios Calculados** (con indicador del recomendado). Al hacer clic en un escenario, todos los KPIs, tablas y gráficas se recalculan dinámicamente en el navegador sin recargar la página.
-- 📊 **Gráfica de Barras Agregada por Canal (HTML5 Canvas)**:
+- 📊 **Gráfica de Barras Agregada por Canal**:
   - Visualiza el uso del espectro por canal (`ARFCN`).
   - Filtros interactivos: *Coincidencias Totales*, *Solo BCCH*, *Solo TCH*, *Conflictos / Coste*.
   - Modo comparativo con barras dobles (Plan Actual en gris vs Escenario en color vivo) para identificar canales descongestionados.
@@ -210,5 +210,5 @@ Este proyecto se distribuye bajo la licencia **MIT**. Consulta el archivo `LICEN
 ---
 
 <div align="center">
-  <sub>Desarrollado con ❤️ para la optimización y modernización de redes de telecomunicaciones móviles 2G GSM.</sub>
+  <sub>Desarrollado para la optimización y modernización de redes de telecomunicaciones móviles 2G GSM.</sub>
 </div>
