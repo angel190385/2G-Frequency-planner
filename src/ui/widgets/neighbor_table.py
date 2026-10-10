@@ -117,7 +117,7 @@ class NeighborTableWidget(QWidget):
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for i in range(len(columns)):
+        for i in range(self.table.columnCount()):
             self.table.setColumnWidth(i, 110)
 
         # Update stats

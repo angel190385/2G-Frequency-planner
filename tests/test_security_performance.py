@@ -116,6 +116,21 @@ class TestSecurityAndPerformance(unittest.TestCase):
             if os.path.exists(test_pdf_path):
                 os.remove(test_pdf_path)
 
+    def test_table_widgets_load_data(self):
+        """NeighborTableWidget and HOTableWidget should load data without undefined variable errors."""
+        from PyQt6.QtWidgets import QApplication
+        from src.ui.widgets.neighbor_table import NeighborTableWidget
+        from src.ui.widgets.ho_table import HOTableWidget
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        nt = NeighborTableWidget()
+        nt.load_data(self.neighbor_graph, self.cells)
+        self.assertEqual(nt.table.rowCount(), len(self.neighbor_graph.all_relations()))
+
+        ht = HOTableWidget()
+        ht.load_data(self.neighbor_graph, self.cells)
+        self.assertEqual(ht.table.rowCount(), len(self.neighbor_graph.all_relations()))
+
 
 if __name__ == "__main__":
     unittest.main()
