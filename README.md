@@ -1,7 +1,7 @@
 <div align="center">
 
 # 📡 Freq Planner 2G
-### Planificación y Optimización de Frecuencias GSM con IA
+### Planificación y Optimización de Frecuencias GSM
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-green.svg?logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
