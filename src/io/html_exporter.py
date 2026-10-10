@@ -1,0 +1,1117 @@
+"""
+Dynamic HTML report exporter for frequency planning results and scenario comparison.
+
+Generates self-contained, interactive, modern HTML dashboards with live scenario switching,
+search and filter capabilities for cell assignments, statistical charts, and full print/export styling.
+"""
+from __future__ import annotations
+import json
+import os
+import sys
+from datetime import datetime
+from typing import Optional
+
+from src.models.cell import Cell
+from src.models.neighbor import NeighborGraph
+from src.models.frequency_plan import PlanResult, FrequencyAssignment
+from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
+from src.engine.cost_function import evaluate_plan
+
+
+def generate_baseline_plan(
+    cells: dict[str, Cell],
+    neighbor_graph: NeighborGraph,
+    rules: FrequencyRules
+) -> PlanResult:
+    """Evaluate the current/original cell frequencies to obtain a baseline PlanResult."""
+    assignments: dict[str, FrequencyAssignment] = {}
+    for cid, cell in cells.items():
+        assignments[cid] = FrequencyAssignment(
+            cell_id=cid,
+            bcch=cell.bcch if cell.bcch is not None else 0,
+            tch_list=list(cell.tch_list)
+        )
+
+    return evaluate_plan(
+        assignments=assignments,
+        cells=cells,
+        neighbor_graph=neighbor_graph,
+        rules=rules,
+        plan_id=0,
+        run_id=0,
+        collect_violations=True
+    )
+
+
+def export_plan_html(
+    file_path: str,
+    cells: dict[str, Cell],
+    neighbor_graph: NeighborGraph,
+    rules: FrequencyRules,
+    results: list[PlanResult],
+    selected_plan_id: Optional[int] = None
+) -> str:
+    """
+    Generate and save a rich dynamic interactive HTML dashboard report.
+
+    Args:
+        file_path: Target path for the HTML file (.html).
+        cells: Loaded network cells dictionary.
+        neighbor_graph: Neighbor relations and handover graph.
+        rules: Active frequency rules and configuration.
+        results: List of calculated PlanResult objects.
+        selected_plan_id: ID of the selected plan to highlight.
+
+    Returns:
+        The written file path.
+    """
+    # 1. Baseline evaluation
+    baseline = generate_baseline_plan(cells, neighbor_graph, rules)
+
+    # 2. Extract up to 3 candidate scenarios
+    scenarios: list[PlanResult] = []
+    if results:
+        sorted_results = sorted(results, key=lambda r: r.score)
+        scenarios = sorted_results[:3]
+
+    selected_plan = None
+    if selected_plan_id is not None:
+        for r in results:
+            if r.plan_id == selected_plan_id:
+                selected_plan = r
+                break
+    if not selected_plan and scenarios:
+        selected_plan = scenarios[0]
+
+    # 3. Model info
+    stat_key = getattr(rules, "ho_statistical_model", "logarithmic")
+    stat_info = STATISTICAL_MODELS.get(stat_key, STATISTICAL_MODELS["logarithmic"])
+    ho_stats = neighbor_graph.get_ho_statistics()
+
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    # 4. Prepare JSON data payload for dynamic JS dashboard
+    payload = _build_payload(
+        cells=cells,
+        neighbor_graph=neighbor_graph,
+        rules=rules,
+        baseline=baseline,
+        scenarios=scenarios,
+        stat_info=stat_info,
+        ho_stats=ho_stats,
+        now_str=now_str
+    )
+
+    # 5. Build HTML file
+    html = _build_html_template(payload)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return file_path
+
+
+def _calc_improvement(old_val: float, new_val: float) -> str:
+    if old_val <= 0:
+        return "0.0%" if new_val == 0 else "N/A"
+    diff = old_val - new_val
+    pct = (diff / old_val) * 100.0
+    return f"+{pct:.1f}%" if pct > 0 else f"{pct:.1f}%"
+
+
+def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
+    assign_map = {a.cell_id: a for a in plan.assignments}
+
+    # Count modified cells
+    modified_cells = 0
+    cell_details = []
+
+    for cid in sorted(cells.keys()):
+        c = cells[cid]
+        a = assign_map.get(cid)
+        if not a:
+            continue
+
+        bcch_before = c.bcch
+        bcch_after = a.bcch
+        bcch_changed = (bcch_before != bcch_after)
+
+        tch_before = list(c.tch_list)
+        tch_after = list(a.tch_list)
+        tch_changed = (tch_before != tch_after)
+
+        is_changed = bcch_changed or tch_changed
+        if is_changed:
+            modified_cells += 1
+
+        cell_details.append({
+            "cell_id": c.cell_id,
+            "station": c.station.name,
+            "station_id": c.station.station_id,
+            "sector": c.sector,
+            "bcch_before": bcch_before,
+            "bcch_after": bcch_after,
+            "bcch_changed": bcch_changed,
+            "tch_before": tch_before,
+            "tch_after": tch_after,
+            "tch_changed": tch_changed,
+            "is_changed": is_changed
+        })
+
+    violations_data = []
+    for v in sorted(plan.violations, key=lambda x: x.weighted_cost, reverse=True):
+        both = f"{v.channel_type_a}-{v.channel_type_b}"
+        violations_data.append({
+            "type": "Cocanal" if v.violation_type == "cochannel" else "Adyacente",
+            "channel_types": both,
+            "cell_a": v.cell_a_id,
+            "cell_b": v.cell_b_id,
+            "freq_a": v.freq_a,
+            "freq_b": v.freq_b,
+            "ho": v.ho_count if v.ho_count is not None else 0,
+            "dist": round(v.distance_km, 2),
+            "cost": round(v.weighted_cost, 1),
+            "severity": "critical" if both == "BCCH-BCCH" else ("high" if "BCCH" in both else "medium")
+        })
+
+    return {
+        "id": plan.plan_id,
+        "name": name,
+        "score": round(plan.score, 1),
+        "critical_violations": plan.critical_violations,
+        "total_violations": plan.total_violations,
+        "cochannel_bcch_bcch": plan.cochannel_bcch_bcch,
+        "cochannel_bcch_tch": plan.cochannel_bcch_tch,
+        "cochannel_tch_tch": plan.cochannel_tch_tch,
+        "adjacent_bcch_bcch": plan.adjacent_bcch_bcch,
+        "adjacent_bcch_tch": plan.adjacent_bcch_tch,
+        "adjacent_tch_tch": plan.adjacent_tch_tch,
+        "cochannel_ho_weighted": round(plan.cochannel_ho_weighted, 1),
+        "adjacent_ho_weighted": round(plan.adjacent_ho_weighted, 1),
+        "same_station": plan.same_station_cochannel + plan.same_station_adjacent,
+        "modified_cells": modified_cells,
+        "total_cells": len(cells),
+        "cells": cell_details,
+        "violations": violations_data
+    }
+
+
+def _build_payload(
+    cells: dict[str, Cell],
+    neighbor_graph: NeighborGraph,
+    rules: FrequencyRules,
+    baseline: PlanResult,
+    scenarios: list[PlanResult],
+    stat_info: dict,
+    ho_stats: dict,
+    now_str: str
+) -> dict:
+    baseline_dict = _plan_to_dict(baseline, "Plan Actual (Línea Base)", cells)
+
+    scenarios_dicts = []
+    for idx, sc in enumerate(scenarios, start=1):
+        name = f"Escenario {idx}" + (" (Recomendado)" if idx == 1 else "")
+        sc_dict = _plan_to_dict(sc, name, cells)
+        sc_dict["improvement_score"] = _calc_improvement(baseline.score, sc.score)
+        sc_dict["improvement_critical"] = _calc_improvement(baseline.critical_violations, sc.critical_violations)
+        sc_dict["improvement_violations"] = _calc_improvement(baseline.total_violations, sc.total_violations)
+        scenarios_dicts.append(sc_dict)
+
+    return {
+        "metadata": {
+            "title": "Informe de Planificación y Optimización de Frecuencias GSM 2G",
+            "generated_at": now_str,
+            "total_cells": len(cells),
+            "total_stations": len(set(c.station.station_id for c in cells.values())),
+            "total_relations": neighbor_graph.total_relations,
+            "freq_range_start": rules.freq_range_start,
+            "freq_range_end": rules.freq_range_end,
+            "available_freqs": len(rules.available_frequencies),
+            "excluded_freqs": rules.excluded_frequencies,
+            "stat_model": stat_info,
+            "ho_stats": ho_stats,
+            "population_size": rules.population_size,
+            "generations": rules.num_generations,
+            "num_runs": rules.num_runs,
+        },
+        "baseline": baseline_dict,
+        "scenarios": scenarios_dicts
+    }
+
+
+def _build_html_template(payload: dict) -> str:
+    payload_json = json.dumps(payload, ensure_ascii=False)
+
+    return f"""<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freq Planner 2G — Dashboard Dinámico</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-body: #0c1017;
+            --bg-surface: #141a24;
+            --bg-card: #1c2432;
+            --bg-card-hover: #232e3f;
+            --border: #2b384e;
+            --border-subtle: #1e2838;
+            --text-main: #f0f4f8;
+            --text-muted: #8b9bb4;
+            --text-dim: #5c6b84;
+            --primary: #00d4aa;
+            --primary-glow: rgba(0, 212, 170, 0.2);
+            --primary-dark: #00a884;
+            --accent-blue: #38bdf8;
+            --accent-purple: #a855f7;
+            --accent-orange: #fb923c;
+            --danger: #f43f5e;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }}
+
+        [data-theme="light"] {{
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-card: #f1f5f9;
+            --bg-card-hover: #e2e8f0;
+            --border: #cbd5e1;
+            --border-subtle: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-dim: #94a3b8;
+            --primary: #0d9488;
+            --primary-glow: rgba(13, 148, 136, 0.15);
+            --primary-dark: #0f766e;
+            --accent-blue: #0284c7;
+            --accent-purple: #9333ea;
+            --accent-orange: #ea580c;
+            --danger: #e11d48;
+            --warning: #d97706;
+            --success: #059669;
+            --shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.1);
+        }}
+
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }}
+
+        body {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 24px;
+        }}
+
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+
+        /* Header Navigation */
+        header {{
+            background: linear-gradient(135deg, var(--bg-surface) 0%, rgba(20, 26, 36, 0.8) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px 32px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }}
+
+        .header-brand h1 {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #38bdf8 0%, #00d4aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+
+        .header-brand p {{
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 4px;
+        }}
+
+        .header-actions {{
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }}
+
+        .btn {{
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-main);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+        }}
+
+        .btn:hover {{
+            background: var(--bg-card-hover);
+            transform: translateY(-1px);
+        }}
+
+        .btn-primary {{
+            background: var(--primary);
+            color: #0c1017;
+            border-color: var(--primary);
+            font-weight: 700;
+        }}
+
+        .btn-primary:hover {{
+            background: var(--primary-dark);
+            box-shadow: 0 0 15px var(--primary-glow);
+        }}
+
+        /* Scenario Selector Pills */
+        .scenario-selector-wrap {{
+            margin-bottom: 24px;
+        }}
+
+        .section-label {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+
+        .scenario-tabs {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+        }}
+
+        .scenario-card {{
+            background: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }}
+
+        .scenario-card:hover {{
+            border-color: var(--text-dim);
+            transform: translateY(-2px);
+        }}
+
+        .scenario-card.active {{
+            border-color: var(--primary);
+            background: linear-gradient(180deg, rgba(0, 212, 170, 0.08) 0%, var(--bg-surface) 100%);
+            box-shadow: 0 0 20px -5px var(--primary-glow);
+        }}
+
+        .scenario-card .badge-rec {{
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--primary);
+            color: #0c1017;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .scenario-card .title {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }}
+
+        .scenario-card .metric-score {{
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+        }}
+
+        .scenario-card.is-baseline .metric-score {{
+            color: var(--text-muted);
+        }}
+
+        .scenario-card .stats-row {{
+            display: flex;
+            gap: 12px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }}
+
+        .scenario-card .stat-pill {{
+            background: var(--bg-card);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+        }}
+
+        /* KPI Grid */
+        .kpi-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+
+        .kpi-card {{
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            position: relative;
+        }}
+
+        .kpi-title {{
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }}
+
+        .kpi-value {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text-main);
+        }}
+
+        .kpi-change {{
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }}
+
+        .change-good {{ color: var(--success); }}
+        .change-bad {{ color: var(--danger); }}
+        .change-neutral {{ color: var(--text-dim); }}
+
+        /* Two-Column Main Content */
+        .grid-2col {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }}
+
+        @media (max-width: 1024px) {{
+            .grid-2col {{ grid-template-columns: 1fr; }}
+        }}
+
+        .panel {{
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            box-shadow: var(--shadow);
+        }}
+
+        .panel-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }}
+
+        .panel-title {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 17px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+
+        /* Comparison Table */
+        .data-table-wrap {{
+            overflow-x: auto;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }}
+
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }}
+
+        th {{
+            background: var(--bg-card);
+            color: var(--text-muted);
+            padding: 12px 14px;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }}
+
+        td {{
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-main);
+        }}
+
+        tr:hover td {{
+            background: rgba(255, 255, 255, 0.02);
+        }}
+
+        .font-mono {{
+            font-family: 'JetBrains Mono', monospace;
+        }}
+
+        .badge-pill {{
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+
+        .badge-danger {{ background: rgba(244, 63, 94, 0.15); color: var(--danger); border: 1px solid rgba(244, 63, 94, 0.3); }}
+        .badge-warning {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }}
+        .badge-success {{ background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }}
+        .badge-info {{ background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid rgba(56, 189, 248, 0.3); }}
+
+        /* Filter Controls */
+        .filter-bar {{
+            display: flex;
+            gap: 12px;
+            margin-bottom: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+        }}
+
+        .search-input {{
+            flex: 1;
+            min-width: 220px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 9px 14px;
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            outline: none;
+        }}
+
+        .search-input:focus {{
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px var(--primary-glow);
+        }}
+
+        .toggle-label {{
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }}
+
+        .toggle-label input {{
+            accent-color: var(--primary);
+            cursor: pointer;
+        }}
+
+        /* Methodology Card */
+        .methodology-box {{
+            background: linear-gradient(135deg, rgba(0, 212, 170, 0.05) 0%, rgba(56, 189, 248, 0.05) 100%);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--primary);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 24px;
+        }}
+
+        .methodology-box h3 {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }}
+
+        .formula-card {{
+            background: var(--bg-card);
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--accent-blue);
+            margin: 8px 0;
+            border: 1px solid var(--border);
+        }}
+
+        /* Print Style */
+        @media print {{
+            body {{
+                background: #ffffff !important;
+                color: #000000 !important;
+                padding: 0 !important;
+            }}
+            header, .scenario-selector-wrap, .filter-bar, .header-actions {{
+                display: none !important;
+            }}
+            .panel {{
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+                page-break-inside: avoid;
+                margin-bottom: 20px;
+            }}
+            th {{
+                background: #eee !important;
+                color: #000 !important;
+            }}
+        }}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <header>
+        <div class="header-brand">
+            <h1>📡 Freq Planner 2G <span>•</span> Dashboard Dinámico</h1>
+            <p>Análisis Comparativo del Plan Actual vs Escenarios Calculados • Generado: <span id="meta-date"></span></p>
+        </div>
+        <div class="header-actions">
+            <button class="btn" onclick="toggleTheme()">🌓 Modo Tema</button>
+            <button class="btn" onclick="window.print()">🖨️ Imprimir / Guardar</button>
+            <button class="btn btn-primary" onclick="exportActiveCsv()">📥 Exportar CSV</button>
+        </div>
+    </header>
+
+    <!-- Methodology Overview -->
+    <div class="methodology-box">
+        <h3 id="stat-model-name">Modelo de Cálculo Estadístico</h3>
+        <div class="formula-card" id="stat-model-formula">Fórmula</div>
+        <p id="stat-model-desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 6px;"></p>
+        <p id="stat-model-usage" style="font-size: 12px; color: var(--accent-orange);"></p>
+    </div>
+
+    <!-- Scenario Selector -->
+    <div class="scenario-selector-wrap">
+        <div class="section-label">
+            <span>Selecciona un Escenario para Inspeccionar</span>
+            <span id="label-cells-summary"></span>
+        </div>
+        <div class="scenario-tabs" id="scenario-tabs-container"></div>
+    </div>
+
+    <!-- Dynamic KPI Grid -->
+    <div class="kpi-grid" id="kpi-grid-container"></div>
+
+    <!-- Global Comparison Matrix Table -->
+    <div class="panel" style="margin-bottom: 24px;">
+        <div class="panel-header">
+            <div class="panel-title">⚖️ Matriz Comparativa de Escenarios</div>
+            <div style="font-size: 12px; color: var(--text-muted);">Línea Base vs Alternativas del Optimizador</div>
+        </div>
+        <div class="data-table-wrap">
+            <table id="matrix-table">
+                <thead>
+                    <tr>
+                        <th>Métrica de Red</th>
+                        <th>Plan Actual</th>
+                        <th id="th-sc1">Escenario 1</th>
+                        <th id="th-sc2">Escenario 2</th>
+                        <th id="th-sc3">Escenario 3</th>
+                        <th>% Mejora (Mejor Escenario)</th>
+                    </tr>
+                </thead>
+                <tbody id="matrix-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Cell Assignments Detail Table -->
+    <div class="panel" style="margin-bottom: 24px;">
+        <div class="panel-header">
+            <div class="panel-title">📋 Detalle de Asignaciones por Celda (<span id="active-scenario-title"></span>)</div>
+            <span class="badge-pill badge-info" id="active-changed-count">0 cambios</span>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="search-cells" class="search-input" placeholder="🔍 Buscar por Cell ID, Estación o Sector..." oninput="renderCellsTable()">
+            <label class="toggle-label">
+                <input type="checkbox" id="toggle-only-changed" onchange="renderCellsTable()" checked>
+                Mostrar solo celdas modificadas
+            </label>
+        </div>
+
+        <div class="data-table-wrap" style="max-height: 480px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cell ID</th>
+                        <th>Estación</th>
+                        <th>Sector</th>
+                        <th>BCCH Antes</th>
+                        <th>BCCH Después</th>
+                        <th>TCH Antes</th>
+                        <th>TCH Después</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="cells-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Residual Violations Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title">⚠️ Relaciones Críticas y Violaciones Residuales (<span id="active-violations-title"></span>)</div>
+            <span class="badge-pill badge-danger" id="active-violations-count">0 violaciones</span>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="search-viol" class="search-input" placeholder="🔍 Filtrar por Celda A o Celda B..." oninput="renderViolationsTable()">
+        </div>
+
+        <div class="data-table-wrap" style="max-height: 380px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tipo Conflicto</th>
+                        <th>Celda A</th>
+                        <th>Celda B</th>
+                        <th>Freq A</th>
+                        <th>Freq B</th>
+                        <th>Handovers</th>
+                        <th>Distancia</th>
+                        <th>Coste Ponderado</th>
+                        <th>Severidad</th>
+                    </tr>
+                </thead>
+                <tbody id="violations-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Embedded Data Payload
+    const data = {payload_json};
+
+    let activeScenarioIndex = 0; // 0: Scenario 1, 1: Scenario 2, etc. (or -1 for baseline)
+
+    function init() {{
+        document.getElementById('meta-date').innerText = data.metadata.generated_at;
+        document.getElementById('label-cells-summary').innerText = 
+            `${{data.metadata.total_cells}} celdas • ${{data.metadata.total_relations}} relaciones de vecindad • Rango ARFCN ${{data.metadata.freq_range_start}}-${{data.metadata.freq_range_end}}`;
+
+        // Methodology
+        const m = data.metadata.stat_model;
+        document.getElementById('stat-model-name').innerText = `📐 Modelo Estadístico: ${{m.name}}`;
+        document.getElementById('stat-model-formula').innerText = `Formulación: ${{m.formula}}`;
+        document.getElementById('stat-model-desc').innerText = m.description;
+        document.getElementById('stat-model-usage').innerText = `💡 Criterio de uso: ${{m.usage}}`;
+
+        renderScenarioTabs();
+        renderMatrixTable();
+        selectScenario(0); // Select first scenario by default
+    }}
+
+    function renderScenarioTabs() {{
+        const container = document.getElementById('scenario-tabs-container');
+        container.innerHTML = '';
+
+        // Baseline card
+        const base = data.baseline;
+        const baseCard = document.createElement('div');
+        baseCard.className = `scenario-card is-baseline ${{activeScenarioIndex === -1 ? 'active' : ''}}`;
+        baseCard.onclick = () => selectScenario(-1);
+        baseCard.innerHTML = `
+            <div class="title">🏛️ Plan Actual (Original)</div>
+            <div class="metric-score">${{base.score.toFixed(1)}}</div>
+            <div class="stats-row">
+                <span class="stat-pill">Críticas: ${{base.critical_violations}}</span>
+                <span class="stat-pill">Total Viol: ${{base.total_violations}}</span>
+            </div>
+        `;
+        container.appendChild(baseCard);
+
+        // Scenarios cards
+        data.scenarios.forEach((sc, idx) => {{
+            const card = document.createElement('div');
+            card.className = `scenario-card ${{activeScenarioIndex === idx ? 'active' : ''}}`;
+            card.onclick = () => selectScenario(idx);
+
+            const recBadge = idx === 0 ? '<span class="badge-rec">Recomendado</span>' : '';
+            card.innerHTML = `
+                ${{recBadge}}
+                <div class="title">${{sc.name}}</div>
+                <div class="metric-score">${{sc.score.toFixed(1)}}</div>
+                <div class="stats-row">
+                    <span class="stat-pill">Críticas: ${{sc.critical_violations}}</span>
+                    <span class="stat-pill">Total: ${{sc.total_violations}}</span>
+                    <span class="stat-pill" style="color: var(--success); font-weight: bold;">${{sc.improvement_score}}</span>
+                </div>
+            `;
+            container.appendChild(card);
+        }});
+    }}
+
+    function selectScenario(index) {{
+        activeScenarioIndex = index;
+        renderScenarioTabs();
+
+        const activePlan = index === -1 ? data.baseline : data.scenarios[index];
+        const base = data.baseline;
+
+        document.getElementById('active-scenario-title').innerText = activePlan.name;
+        document.getElementById('active-changed-count').innerText = `${{activePlan.modified_cells}} de ${{activePlan.total_cells}} celdas modificadas`;
+        document.getElementById('active-violations-title').innerText = activePlan.name;
+        document.getElementById('active-violations-count').innerText = `${{activePlan.violations.length}} violaciones`;
+
+        // Render KPI Cards
+        renderKpis(activePlan, base);
+
+        // Render Tables
+        renderCellsTable();
+        renderViolationsTable();
+    }}
+
+    function renderKpis(plan, base) {{
+        const container = document.getElementById('kpi-grid-container');
+
+        function diffHtml(newVal, oldVal, lowerIsBetter = true) {{
+            if (activeScenarioIndex === -1) return '';
+            const diff = oldVal - newVal;
+            if (diff === 0) return '<div class="kpi-change change-neutral">Sin cambio</div>';
+            const isGood = lowerIsBetter ? (diff > 0) : (diff < 0);
+            const pct = oldVal > 0 ? ((Math.abs(diff) / oldVal) * 100).toFixed(1) : '0';
+            const sign = diff > 0 ? '-' : '+';
+            return `<div class="kpi-change ${{isGood ? 'change-good' : 'change-bad'}}">${{sign}}${{Math.abs(diff)}} (${{pct}}% ${{isGood ? 'mejora' : 'degradación'}})</div>`;
+        }}
+
+        container.innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-title">Score Global (Coste)</div>
+                <div class="kpi-value">${{plan.score.toFixed(1)}}</div>
+                ${{activeScenarioIndex !== -1 ? diffHtml(plan.score, base.score) : '<div class="kpi-change change-neutral">Línea base</div>'}}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Violaciones Críticas (BCCH-BCCH)</div>
+                <div class="kpi-value" style="color: ${{plan.critical_violations > 0 ? 'var(--danger)' : 'var(--success)'}};">${{plan.critical_violations}}</div>
+                ${{activeScenarioIndex !== -1 ? diffHtml(plan.critical_violations, base.critical_violations) : '<div class="kpi-change change-neutral">Línea base</div>'}}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Total Violaciones</div>
+                <div class="kpi-value" style="color: ${{plan.total_violations > 0 ? 'var(--warning)' : 'var(--success)'}};">${{plan.total_violations}}</div>
+                ${{activeScenarioIndex !== -1 ? diffHtml(plan.total_violations, base.total_violations) : '<div class="kpi-change change-neutral">Línea base</div>'}}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Ponderación HO Cocanal</div>
+                <div class="kpi-value">${{plan.cochannel_ho_weighted.toFixed(1)}}</div>
+                ${{activeScenarioIndex !== -1 ? diffHtml(plan.cochannel_ho_weighted, base.cochannel_ho_weighted) : '<div class="kpi-change change-neutral">Línea base</div>'}}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Celdas Modificadas</div>
+                <div class="kpi-value" style="color: var(--accent-orange);">${{plan.modified_cells}} <span style="font-size: 14px; font-weight: normal; color: var(--text-muted);">/ ${{plan.total_cells}}</span></div>
+                <div class="kpi-change change-neutral">${{((plan.modified_cells / plan.total_cells) * 100).toFixed(1)}}% de la red</div>
+            </div>
+        `;
+    }}
+
+    function renderMatrixTable() {{
+        const tbody = document.getElementById('matrix-tbody');
+        const b = data.baseline;
+        const s1 = data.scenarios[0] || b;
+        const s2 = data.scenarios[1] || null;
+        const s3 = data.scenarios[2] || null;
+
+        const metrics = [
+            {{ name: "Score Global (Coste Total)", b: b.score.toFixed(1), s1: s1.score.toFixed(1), s2: s2 ? s2.score.toFixed(1) : "—", s3: s3 ? s3.score.toFixed(1) : "—", imp: s1.improvement_score }},
+            {{ name: "Violaciones Críticas (BCCH-BCCH)", b: b.critical_violations, s1: s1.critical_violations, s2: s2 ? s2.critical_violations : "—", s3: s3 ? s3.critical_violations : "—", imp: s1.improvement_critical }},
+            {{ name: "Total Violaciones (Cocanal + Adj)", b: b.total_violations, s1: s1.total_violations, s2: s2 ? s2.total_violations : "—", s3: s3 ? s3.total_violations : "—", imp: s1.improvement_violations }},
+            {{ name: "Cocanalidad BCCH-BCCH", b: b.cochannel_bcch_bcch, s1: s1.cochannel_bcch_bcch, s2: s2 ? s2.cochannel_bcch_bcch : "—", s3: s3 ? s3.cochannel_bcch_bcch : "—", imp: "-" }},
+            {{ name: "Cocanalidad BCCH-TCH", b: b.cochannel_bcch_tch, s1: s1.cochannel_bcch_tch, s2: s2 ? s2.cochannel_bcch_tch : "—", s3: s3 ? s3.cochannel_bcch_tch : "—", imp: "-" }},
+            {{ name: "Cocanalidad TCH-TCH", b: b.cochannel_tch_tch, s1: s1.cochannel_tch_tch, s2: s2 ? s2.cochannel_tch_tch : "—", s3: s3 ? s3.cochannel_tch_tch : "—", imp: "-" }},
+            {{ name: "Adyacencia BCCH-BCCH", b: b.adjacent_bcch_bcch, s1: s1.adjacent_bcch_bcch, s2: s2 ? s2.adjacent_bcch_bcch : "—", s3: s3 ? s3.adjacent_bcch_bcch : "—", imp: "-" }},
+            {{ name: "Adyacencia BCCH-TCH", b: b.adjacent_bcch_tch, s1: s1.adjacent_bcch_tch, s2: s2 ? s2.adjacent_bcch_tch : "—", s3: s3 ? s3.adjacent_bcch_tch : "—", imp: "-" }},
+            {{ name: "Adyacencia TCH-TCH", b: b.adjacent_tch_tch, s1: s1.adjacent_tch_tch, s2: s2 ? s2.adjacent_tch_tch : "—", s3: s3 ? s3.adjacent_tch_tch : "—", imp: "-" }},
+            {{ name: "Ponderación HO Cocanal", b: b.cochannel_ho_weighted.toFixed(1), s1: s1.cochannel_ho_weighted.toFixed(1), s2: s2 ? s2.cochannel_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.cochannel_ho_weighted.toFixed(1) : "—", imp: "-" }},
+            {{ name: "Ponderación HO Adyacente", b: b.adjacent_ho_weighted.toFixed(1), s1: s1.adjacent_ho_weighted.toFixed(1), s2: s2 ? s2.adjacent_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.adjacent_ho_weighted.toFixed(1) : "—", imp: "-" }},
+            {{ name: "Conflictos Misma Estación", b: b.same_station, s1: s1.same_station, s2: s2 ? s2.same_station : "—", s3: s3 ? s3.same_station : "—", imp: "-" }},
+            {{ name: "Celdas Modificadas", b: "0", s1: `${{s1.modified_cells}} (${{((s1.modified_cells/b.total_cells)*100).toFixed(1)}}%)`, s2: s2 ? `${{s2.modified_cells}}` : "—", s3: s3 ? `${{s3.modified_cells}}` : "—", imp: "-" }}
+        ];
+
+        tbody.innerHTML = metrics.map(m => `
+            <tr>
+                <td style="font-weight: 600;">${{m.name}}</td>
+                <td class="font-mono" style="color: var(--text-muted);">${{m.b}}</td>
+                <td class="font-mono" style="color: var(--primary); font-weight: bold;">${{m.s1}}</td>
+                <td class="font-mono">${{m.s2}}</td>
+                <td class="font-mono">${{m.s3}}</td>
+                <td class="font-mono" style="color: ${{m.imp.startsWith('+') ? 'var(--success)' : 'inherit'}}; font-weight: bold;">${{m.imp}}</td>
+            </tr>
+        `).join('');
+    }}
+
+    function renderCellsTable() {{
+        const tbody = document.getElementById('cells-tbody');
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const search = document.getElementById('search-cells').value.toLowerCase().trim();
+        const onlyChanged = document.getElementById('toggle-only-changed').checked;
+
+        const filtered = plan.cells.filter(c => {{
+            if (onlyChanged && !c.is_changed) return false;
+            if (search) {{
+                const text = `${{c.cell_id}} ${{c.station}} ${{c.station_id}} ${{c.sector}}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }}
+            return true;
+        }});
+
+        if (filtered.length === 0) {{
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 24px;">No se encontraron celdas con los filtros actuales.</td></tr>`;
+            return;
+        }}
+
+        tbody.innerHTML = filtered.map(c => {{
+            const bcchBefore = c.bcch_before !== null ? c.bcch_before : '—';
+            const bcchAfter = c.bcch_after !== null ? c.bcch_after : '—';
+            const bcchStyle = c.bcch_changed ? 'color: var(--danger); font-weight: bold;' : '';
+
+            const tchBefore = c.tch_before.length ? c.tch_before.join(', ') : '—';
+            const tchAfter = c.tch_after.length ? c.tch_after.join(', ') : '—';
+            const tchStyle = c.tch_changed ? 'color: var(--accent-blue); font-weight: bold;' : '';
+
+            const statusBadge = c.is_changed 
+                ? '<span class="badge-pill badge-warning">✓ Modificado</span>'
+                : '<span class="badge-pill" style="color: var(--text-dim);">Sin cambio</span>';
+
+            return `
+                <tr>
+                    <td style="font-weight: 700;">${{c.cell_id}}</td>
+                    <td>${{c.station}}</td>
+                    <td><span class="badge-pill" style="background: var(--bg-card);">${{c.sector}}</span></td>
+                    <td class="font-mono">${{bcchBefore}}</td>
+                    <td class="font-mono" style="${{bcchStyle}}">${{bcchAfter}}</td>
+                    <td class="font-mono" style="font-size: 12px;">${{tchBefore}}</td>
+                    <td class="font-mono" style="font-size: 12px; ${{tchStyle}}">${{tchAfter}}</td>
+                    <td>${{statusBadge}}</td>
+                </tr>
+            `;
+        }}).join('');
+    }}
+
+    function renderViolationsTable() {{
+        const tbody = document.getElementById('violations-tbody');
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const search = document.getElementById('search-viol').value.toLowerCase().trim();
+
+        const filtered = plan.violations.filter(v => {{
+            if (search) {{
+                const text = `${{v.cell_a}} ${{v.cell_b}} ${{v.type}} ${{v.channel_types}}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }}
+            return true;
+        }});
+
+        if (filtered.length === 0) {{
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--success); font-weight: bold; padding: 24px;">✅ No hay violaciones registradas en este plan.</td></tr>`;
+            return;
+        }}
+
+        tbody.innerHTML = filtered.map(v => {{
+            let badgeClass = 'badge-info';
+            if (v.severity === 'critical') badgeClass = 'badge-danger';
+            else if (v.severity === 'high') badgeClass = 'badge-warning';
+
+            return `
+                <tr>
+                    <td><span class="badge-pill ${{badgeClass}}">${{v.type}} (${{v.channel_types}})</span></td>
+                    <td style="font-weight: 700;">${{v.cell_a}}</td>
+                    <td style="font-weight: 700;">${{v.cell_b}}</td>
+                    <td class="font-mono">${{v.freq_a}}</td>
+                    <td class="font-mono">${{v.freq_b}}</td>
+                    <td class="font-mono">${{v.ho || '—'}}</td>
+                    <td class="font-mono">${{v.dist}} km</td>
+                    <td class="font-mono" style="font-weight: bold; color: var(--danger);">${{v.cost}}</td>
+                    <td><span class="badge-pill ${{badgeClass}}">${{v.severity.toUpperCase()}}</span></td>
+                </tr>
+            `;
+        }}).join('');
+    }}
+
+    function toggleTheme() {{
+        const html = document.documentElement;
+        const current = html.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+    }}
+
+    function exportActiveCsv() {{
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        let csv = "Cell_ID;Station;Sector;BCCH_Antes;BCCH_Despues;TCH_Antes;TCH_Despues;Modificado\\n";
+
+        plan.cells.forEach(c => {{
+            csv += `${{c.cell_id}};${{c.station}};${{c.sector}};${{c.bcch_before || ''}};${{c.bcch_after || ''}};${{c.tch_before.join(',')}};${{c.tch_after.join(',')}};${{c.is_changed ? 'SI' : 'NO'}}\\n`;
+        }});
+
+        const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plan_${{plan.name.replace(/[^a-zA-Z0-9]/g, '_')}}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }}
+
+    // Auto-init on load
+    window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
+"""

@@ -36,3 +36,6 @@ ENV/
 .gemini/
 .DS_Store
 Thumbs.db
+
+# Reports
+*.pdf

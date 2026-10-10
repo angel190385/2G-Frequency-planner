@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freq Planner 2G — Dashboard Dinámico</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-body: #0c1017;
+            --bg-surface: #141a24;
+            --bg-card: #1c2432;
+            --bg-card-hover: #232e3f;
+            --border: #2b384e;
+            --border-subtle: #1e2838;
+            --text-main: #f0f4f8;
+            --text-muted: #8b9bb4;
+            --text-dim: #5c6b84;
+            --primary: #00d4aa;
+            --primary-glow: rgba(0, 212, 170, 0.2);
+            --primary-dark: #00a884;
+            --accent-blue: #38bdf8;
+            --accent-purple: #a855f7;
+            --accent-orange: #fb923c;
+            --danger: #f43f5e;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-card: #f1f5f9;
+            --bg-card-hover: #e2e8f0;
+            --border: #cbd5e1;
+            --border-subtle: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-dim: #94a3b8;
+            --primary: #0d9488;
+            --primary-glow: rgba(13, 148, 136, 0.15);
+            --primary-dark: #0f766e;
+            --accent-blue: #0284c7;
+            --accent-purple: #9333ea;
+            --accent-orange: #ea580c;
+            --danger: #e11d48;
+            --warning: #d97706;
+            --success: #059669;
+            --shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 24px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header Navigation */
+        header {
+            background: linear-gradient(135deg, var(--bg-surface) 0%, rgba(20, 26, 36, 0.8) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px 32px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .header-brand h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #38bdf8 0%, #00d4aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand p {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-main);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+        }
+
+        .btn:hover {
+            background: var(--bg-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #0c1017;
+            border-color: var(--primary);
+            font-weight: 700;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            box-shadow: 0 0 15px var(--primary-glow);
+        }
+
+        /* Scenario Selector Pills */
+        .scenario-selector-wrap {
+            margin-bottom: 24px;
+        }
+
+        .section-label {
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .scenario-tabs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+        }
+
+        .scenario-card {
+            background: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .scenario-card:hover {
+            border-color: var(--text-dim);
+            transform: translateY(-2px);
+        }
+
+        .scenario-card.active {
+            border-color: var(--primary);
+            background: linear-gradient(180deg, rgba(0, 212, 170, 0.08) 0%, var(--bg-surface) 100%);
+            box-shadow: 0 0 20px -5px var(--primary-glow);
+        }
+
+        .scenario-card .badge-rec {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--primary);
+            color: #0c1017;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .scenario-card .title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }
+
+        .scenario-card .metric-score {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .scenario-card.is-baseline .metric-score {
+            color: var(--text-muted);
+        }
+
+        .scenario-card .stats-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .scenario-card .stat-pill {
+            background: var(--bg-card);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* KPI Grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .kpi-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            position: relative;
+        }
+
+        .kpi-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .kpi-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .kpi-change {
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .change-good { color: var(--success); }
+        .change-bad { color: var(--danger); }
+        .change-neutral { color: var(--text-dim); }
+
+        /* Two-Column Main Content */
+        .grid-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-2col { grid-template-columns: 1fr; }
+        }
+
+        .panel {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .panel-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 17px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Comparison Table */
+        .data-table-wrap {
+            overflow-x: auto;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        th {
+            background: var(--bg-card);
+            color: var(--text-muted);
+            padding: 12px 14px;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-main);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .badge-pill {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .badge-danger { background: rgba(244, 63, 94, 0.15); color: var(--danger); border: 1px solid rgba(244, 63, 94, 0.3); }
+        .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-info { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid rgba(56, 189, 248, 0.3); }
+
+        /* Filter Controls */
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 220px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 9px 14px;
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px var(--primary-glow);
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-label input {
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        /* Methodology Card */
+        .methodology-box {
+            background: linear-gradient(135deg, rgba(0, 212, 170, 0.05) 0%, rgba(56, 189, 248, 0.05) 100%);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--primary);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .methodology-box h3 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .formula-card {
+            background: var(--bg-card);
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--accent-blue);
+            margin: 8px 0;
+            border: 1px solid var(--border);
+        }
+
+        /* Print Style */
+        @media print {
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                padding: 0 !important;
+            }
+            header, .scenario-selector-wrap, .filter-bar, .header-actions {
+                display: none !important;
+            }
+            .panel {
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+                page-break-inside: avoid;
+                margin-bottom: 20px;
+            }
+            th {
+                background: #eee !important;
+                color: #000 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <header>
+        <div class="header-brand">
+            <h1>📡 Freq Planner 2G <span>•</span> Dashboard Dinámico</h1>
+            <p>Análisis Comparativo del Plan Actual vs Escenarios Calculados • Generado: <span id="meta-date"></span></p>
+        </div>
+        <div class="header-actions">
+            <button class="btn" onclick="toggleTheme()">🌓 Modo Tema</button>
+            <button class="btn" onclick="window.print()">🖨️ Imprimir / Guardar</button>
+            <button class="btn btn-primary" onclick="exportActiveCsv()">📥 Exportar CSV</button>
+        </div>
+    </header>
+
+    <!-- Methodology Overview -->
+    <div class="methodology-box">
+        <h3 id="stat-model-name">Modelo de Cálculo Estadístico</h3>
+        <div class="formula-card" id="stat-model-formula">Fórmula</div>
+        <p id="stat-model-desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 6px;"></p>
+        <p id="stat-model-usage" style="font-size: 12px; color: var(--accent-orange);"></p>
+    </div>
+
+    <!-- Scenario Selector -->
+    <div class="scenario-selector-wrap">
+        <div class="section-label">
+            <span>Selecciona un Escenario para Inspeccionar</span>
+            <span id="label-cells-summary"></span>
+        </div>
+        <div class="scenario-tabs" id="scenario-tabs-container"></div>
+    </div>
+
+    <!-- Dynamic KPI Grid -->
+    <div class="kpi-grid" id="kpi-grid-container"></div>
+
+    <!-- Global Comparison Matrix Table -->
+    <div class="panel" style="margin-bottom: 24px;">
+        <div class="panel-header">
+            <div class="panel-title">⚖️ Matriz Comparativa de Escenarios</div>
+            <div style="font-size: 12px; color: var(--text-muted);">Línea Base vs Alternativas del Optimizador</div>
+        </div>
+        <div class="data-table-wrap">
+            <table id="matrix-table">
+                <thead>
+                    <tr>
+                        <th>Métrica de Red</th>
+                        <th>Plan Actual</th>
+                        <th id="th-sc1">Escenario 1</th>
+                        <th id="th-sc2">Escenario 2</th>
+                        <th id="th-sc3">Escenario 3</th>
+                        <th>% Mejora (Mejor Escenario)</th>
+                    </tr>
+                </thead>
+                <tbody id="matrix-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Cell Assignments Detail Table -->
+    <div class="panel" style="margin-bottom: 24px;">
+        <div class="panel-header">
+            <div class="panel-title">📋 Detalle de Asignaciones por Celda (<span id="active-scenario-title"></span>)</div>
+            <span class="badge-pill badge-info" id="active-changed-count">0 cambios</span>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="search-cells" class="search-input" placeholder="🔍 Buscar por Cell ID, Estación o Sector..." oninput="renderCellsTable()">
+            <label class="toggle-label">
+                <input type="checkbox" id="toggle-only-changed" onchange="renderCellsTable()" checked>
+                Mostrar solo celdas modificadas
+            </label>
+        </div>
+
+        <div class="data-table-wrap" style="max-height: 480px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cell ID</th>
+                        <th>Estación</th>
+                        <th>Sector</th>
+                        <th>BCCH Antes</th>
+                        <th>BCCH Después</th>
+                        <th>TCH Antes</th>
+                        <th>TCH Después</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="cells-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Residual Violations Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <div class="panel-title">⚠️ Relaciones Críticas y Violaciones Residuales (<span id="active-violations-title"></span>)</div>
+            <span class="badge-pill badge-danger" id="active-violations-count">0 violaciones</span>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="search-viol" class="search-input" placeholder="🔍 Filtrar por Celda A o Celda B..." oninput="renderViolationsTable()">
+        </div>
+
+        <div class="data-table-wrap" style="max-height: 380px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tipo Conflicto</th>
+                        <th>Celda A</th>
+                        <th>Celda B</th>
+                        <th>Freq A</th>
+                        <th>Freq B</th>
+                        <th>Handovers</th>
+                        <th>Distancia</th>
+                        <th>Coste Ponderado</th>
+                        <th>Severidad</th>
+                    </tr>
+                </thead>
+                <tbody id="violations-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Embedded Data Payload
+    const data = {"metadata": {"title": "Informe de Planificación y Optimización de Frecuencias GSM 2G", "generated_at": "10/10/2026 12:03:03", "total_cells": 15, "total_stations": 5, "total_relations": 22, "freq_range_start": 100, "freq_range_end": 124, "available_freqs": 25, "excluded_freqs": [], "stat_model": {"id": "logarithmic", "name": "Logarítmico (Compresión de Varianza - Estándar)", "short_name": "Logarítmico", "formula": "w = log2(1 + HO) si HO > 0 else 0.1", "description": "Aplica una compresión sublineal a los traspasos. Amortigua valores extremos de tráfico sin ignorarlos, protegiendo tanto rutas críticas como vecindades secundarias sin que las grandes arterias monopolicen la función de coste.", "usage": "Recomendado como estándar para la mayoría de redes GSM urbanas y mixtas."}, "ho_stats": {"count": 22.0, "mean": 802.2727272727273, "median": 600.0, "max": 2500.0, "min": 200.0}, "population_size": 25, "generations": 15, "num_runs": 3}, "baseline": {"id": 0, "name": "Plan Actual (Línea Base)", "score": 13243179.7, "critical_violations": 10, "total_violations": 89, "cochannel_bcch_bcch": 2, "cochannel_bcch_tch": 4, "cochannel_tch_tch": 17, "adjacent_bcch_bcch": 8, "adjacent_bcch_tch": 11, "adjacent_tch_tch": 47, "cochannel_ho_weighted": 224.7, "adjacent_ho_weighted": 619.8, "same_station": 0, "modified_cells": 0, "total_cells": 15, "cells": [{"cell_id": "EST001A", "station": "Centro", "station_id": "EST001", "sector": "A", "bcch_before": 100, "bcch_after": 100, "bcch_changed": false, "tch_before": [102, 104, 106, 108, 110], "tch_after": [102, 104, 106, 108, 110], "tch_changed": false, "is_changed": false}, {"cell_id": "EST001B", "station": "Centro", "station_id": "EST001", "sector": "B", "bcch_before": 112, "bcch_after": 112, "bcch_changed": false, "tch_before": [114, 116, 118], "tch_after": [114, 116, 118], "tch_changed": false, "is_changed": false}, {"cell_id": "EST001C", "station": "Centro", "station_id": "EST001", "sector": "C", "bcch_before": 120, "bcch_after": 120, "bcch_changed": false, "tch_before": [122, 124], "tch_after": [122, 124], "tch_changed": false, "is_changed": false}, {"cell_id": "EST002A", "station": "Norte", "station_id": "EST002", "sector": "A", "bcch_before": 101, "bcch_after": 101, "bcch_changed": false, "tch_before": [103, 105, 107, 109], "tch_after": [103, 105, 107, 109], "tch_changed": false, "is_changed": false}, {"cell_id": "EST002B", "station": "Norte", "station_id": "EST002", "sector": "B", "bcch_before": 113, "bcch_after": 113, "bcch_changed": false, "tch_before": [115, 117], "tch_after": [115, 117], "tch_changed": false, "is_changed": false}, {"cell_id": "EST002C", "station": "Norte", "station_id": "EST002", "sector": "C", "bcch_before": 121, "bcch_after": 121, "bcch_changed": false, "tch_before": [123], "tch_after": [123], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003A", "station": "Sur", "station_id": "EST003", "sector": "A", "bcch_before": 100, "bcch_after": 100, "bcch_changed": false, "tch_before": [104, 106, 108], "tch_after": [104, 106, 108], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003B", "station": "Sur", "station_id": "EST003", "sector": "B", "bcch_before": 114, "bcch_after": 114, "bcch_changed": false, "tch_before": [116, 118], "tch_after": [116, 118], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003C", "station": "Sur", "station_id": "EST003", "sector": "C", "bcch_before": 122, "bcch_after": 122, "bcch_changed": false, "tch_before": [124], "tch_after": [124], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004A", "station": "Este", "station_id": "EST004", "sector": "A", "bcch_before": 102, "bcch_after": 102, "bcch_changed": false, "tch_before": [106, 108, 110], "tch_after": [106, 108, 110], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004B", "station": "Este", "station_id": "EST004", "sector": "B", "bcch_before": 112, "bcch_after": 112, "bcch_changed": false, "tch_before": [116, 118], "tch_after": [116, 118], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004C", "station": "Este", "station_id": "EST004", "sector": "C", "bcch_before": 120, "bcch_after": 120, "bcch_changed": false, "tch_before": [124], "tch_after": [124], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005A", "station": "Oeste", "station_id": "EST005", "sector": "A", "bcch_before": 105, "bcch_after": 105, "bcch_changed": false, "tch_before": [107, 109, 111], "tch_after": [107, 109, 111], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005B", "station": "Oeste", "station_id": "EST005", "sector": "B", "bcch_before": 115, "bcch_after": 115, "bcch_changed": false, "tch_before": [117, 119], "tch_after": [117, 119], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005C", "station": "Oeste", "station_id": "EST005", "sector": "C", "bcch_before": 121, "bcch_after": 121, "bcch_changed": false, "tch_before": [123], "tch_after": [123], "tch_changed": false, "is_changed": false}], "violations": [{"type": "Cocanal", "channel_types": "BCCH-BCCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 100, "freq_b": 100, "ho": 2500, "dist": 1.09, "cost": 1129957.8, "severity": "critical"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 114, "freq_b": 114, "ho": 1800, "dist": 1.09, "cost": 1081999.0, "severity": "high"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST003C", "freq_a": 122, "freq_b": 122, "ho": 1500, "dist": 1.09, "cost": 1055698.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 100, "freq_b": 101, "ho": 1200, "dist": 1.05, "cost": 1023820.4, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 101, "freq_b": 102, "ho": 1100, "dist": 2.3, "cost": 1011268.2, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 120, "freq_b": 121, "ho": 900, "dist": 1.05, "cost": 982323.6, "severity": "critical"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 102, "freq_b": 102, "ho": 800, "dist": 1.59, "cost": 965048.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 101, "freq_b": 100, "ho": 700, "dist": 2.15, "cost": 946083.3, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 112, "freq_b": 113, "ho": 600, "dist": 1.05, "cost": 923860.6, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 113, "freq_b": 112, "ho": 450, "dist": 2.3, "cost": 882403.7, "severity": "critical"}, {"type": "Cocanal", "channel_types": "BCCH-BCCH", "cell_a": "EST002C", "cell_b": "EST005C", "freq_a": 121, "freq_b": 121, "ho": 350, "dist": 1.31, "cost": 846378.3, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 120, "freq_b": 121, "ho": 300, "dist": 1.37, "cost": 824020.7, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST004C", "cell_b": "EST005C", "freq_a": 120, "freq_b": 121, "ho": 250, "dist": 2.97, "cost": 797792.1, "severity": "critical"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 105, "freq_b": 105, "ho": 200, "dist": 1.31, "cost": 765487.7, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 102, "freq_b": 101, "ho": 1200, "dist": 1.05, "cost": 306.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 103, "freq_b": 102, "ho": 1100, "dist": 2.3, "cost": 303.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 122, "freq_b": 121, "ho": 900, "dist": 1.05, "cost": 294.5, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 105, "ho": 900, "dist": 2.97, "cost": 294.5, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 114, "freq_b": 113, "ho": 600, "dist": 1.05, "cost": 276.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 115, "ho": 600, "dist": 2.97, "cost": 276.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 104, "freq_b": 105, "ho": 500, "dist": 1.37, "cost": 269.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 105, "ho": 500, "dist": 1.37, "cost": 269.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 114, "freq_b": 115, "ho": 400, "dist": 1.37, "cost": 259.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 115, "ho": 400, "dist": 1.37, "cost": 259.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 122, "freq_b": 121, "ho": 300, "dist": 1.37, "cost": 247.0, "severity": "high"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 104, "freq_b": 104, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 106, "freq_b": 106, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 108, "freq_b": 108, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 116, "freq_b": 116, "ho": 1800, "dist": 1.09, "cost": 108.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 118, "freq_b": 118, "ho": 1800, "dist": 1.09, "cost": 108.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST003C", "freq_a": 124, "freq_b": 124, "ho": 1500, "dist": 1.09, "cost": 105.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003A", "cell_b": "EST004A", "freq_a": 106, "freq_b": 106, "ho": 1300, "dist": 1.49, "cost": 103.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003A", "cell_b": "EST004A", "freq_a": 108, "freq_b": 108, "ho": 1300, "dist": 1.49, "cost": 103.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 106, "freq_b": 106, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 108, "freq_b": 108, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 110, "freq_b": 110, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003B", "cell_b": "EST004B", "freq_a": 116, "freq_b": 116, "ho": 550, "dist": 1.49, "cost": 91.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003B", "cell_b": "EST004B", "freq_a": 118, "freq_b": 118, "ho": 550, "dist": 1.49, "cost": 91.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003C", "cell_b": "EST004C", "freq_a": 124, "freq_b": 124, "ho": 400, "dist": 1.49, "cost": 86.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002C", "cell_b": "EST005C", "freq_a": 123, "freq_b": 123, "ho": 350, "dist": 1.31, "cost": 84.6, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 107, "freq_b": 107, "ho": 200, "dist": 1.31, "cost": 76.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 109, "freq_b": 109, "ho": 200, "dist": 1.31, "cost": 76.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 102, "freq_b": 103, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 104, "freq_b": 103, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 104, "freq_b": 105, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 106, "freq_b": 105, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 106, "freq_b": 107, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 108, "freq_b": 107, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 108, "freq_b": 109, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 110, "freq_b": 109, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 105, "freq_b": 106, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 107, "freq_b": 106, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 107, "freq_b": 108, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 109, "freq_b": 108, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 109, "freq_b": 110, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 122, "freq_b": 123, "ho": 900, "dist": 1.05, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 124, "freq_b": 123, "ho": 900, "dist": 1.05, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 107, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 107, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 109, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 109, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 111, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 103, "freq_b": 104, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 105, "freq_b": 104, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 105, "freq_b": 106, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 107, "freq_b": 106, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 107, "freq_b": 108, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 109, "freq_b": 108, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 114, "freq_b": 115, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 116, "freq_b": 115, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 116, "freq_b": 117, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 118, "freq_b": 117, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 117, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 117, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 119, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 107, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 107, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 109, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 109, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 111, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 115, "freq_b": 116, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 117, "freq_b": 116, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 117, "freq_b": 118, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 117, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 117, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 119, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 122, "freq_b": 123, "ho": 300, "dist": 1.37, "cost": 41.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 124, "freq_b": 123, "ho": 300, "dist": 1.37, "cost": 41.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004C", "cell_b": "EST005C", "freq_a": 124, "freq_b": 123, "ho": 250, "dist": 2.97, "cost": 39.9, "severity": "medium"}]}, "scenarios": [{"id": 1, "name": "Escenario 1 (Recomendado)", "score": 8359212.3, "critical_violations": 5, "total_violations": 84, "cochannel_bcch_bcch": 1, "cochannel_bcch_tch": 4, "cochannel_tch_tch": 17, "adjacent_bcch_bcch": 4, "adjacent_bcch_tch": 11, "adjacent_tch_tch": 47, "cochannel_ho_weighted": 213.4, "adjacent_ho_weighted": 582.3, "same_station": 0, "modified_cells": 3, "total_cells": 15, "cells": [{"cell_id": "EST001A", "station": "Centro", "station_id": "EST001", "sector": "A", "bcch_before": 100, "bcch_after": 120, "bcch_changed": true, "tch_before": [102, 104, 106, 108, 110], "tch_after": [102, 104, 106, 108, 110], "tch_changed": false, "is_changed": true}, {"cell_id": "EST001B", "station": "Centro", "station_id": "EST001", "sector": "B", "bcch_before": 112, "bcch_after": 100, "bcch_changed": true, "tch_before": [114, 116, 118], "tch_after": [114, 116, 118], "tch_changed": false, "is_changed": true}, {"cell_id": "EST001C", "station": "Centro", "station_id": "EST001", "sector": "C", "bcch_before": 120, "bcch_after": 112, "bcch_changed": true, "tch_before": [122, 124], "tch_after": [122, 124], "tch_changed": false, "is_changed": true}, {"cell_id": "EST002A", "station": "Norte", "station_id": "EST002", "sector": "A", "bcch_before": 101, "bcch_after": 101, "bcch_changed": false, "tch_before": [103, 105, 107, 109], "tch_after": [103, 105, 107, 109], "tch_changed": false, "is_changed": false}, {"cell_id": "EST002B", "station": "Norte", "station_id": "EST002", "sector": "B", "bcch_before": 113, "bcch_after": 113, "bcch_changed": false, "tch_before": [115, 117], "tch_after": [115, 117], "tch_changed": false, "is_changed": false}, {"cell_id": "EST002C", "station": "Norte", "station_id": "EST002", "sector": "C", "bcch_before": 121, "bcch_after": 121, "bcch_changed": false, "tch_before": [123], "tch_after": [123], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003A", "station": "Sur", "station_id": "EST003", "sector": "A", "bcch_before": 100, "bcch_after": 100, "bcch_changed": false, "tch_before": [104, 106, 108], "tch_after": [104, 106, 108], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003B", "station": "Sur", "station_id": "EST003", "sector": "B", "bcch_before": 114, "bcch_after": 114, "bcch_changed": false, "tch_before": [116, 118], "tch_after": [116, 118], "tch_changed": false, "is_changed": false}, {"cell_id": "EST003C", "station": "Sur", "station_id": "EST003", "sector": "C", "bcch_before": 122, "bcch_after": 122, "bcch_changed": false, "tch_before": [124], "tch_after": [124], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004A", "station": "Este", "station_id": "EST004", "sector": "A", "bcch_before": 102, "bcch_after": 102, "bcch_changed": false, "tch_before": [106, 108, 110], "tch_after": [106, 108, 110], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004B", "station": "Este", "station_id": "EST004", "sector": "B", "bcch_before": 112, "bcch_after": 112, "bcch_changed": false, "tch_before": [116, 118], "tch_after": [116, 118], "tch_changed": false, "is_changed": false}, {"cell_id": "EST004C", "station": "Este", "station_id": "EST004", "sector": "C", "bcch_before": 120, "bcch_after": 120, "bcch_changed": false, "tch_before": [124], "tch_after": [124], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005A", "station": "Oeste", "station_id": "EST005", "sector": "A", "bcch_before": 105, "bcch_after": 105, "bcch_changed": false, "tch_before": [107, 109, 111], "tch_after": [107, 109, 111], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005B", "station": "Oeste", "station_id": "EST005", "sector": "B", "bcch_before": 115, "bcch_after": 115, "bcch_changed": false, "tch_before": [117, 119], "tch_after": [117, 119], "tch_changed": false, "is_changed": false}, {"cell_id": "EST005C", "station": "Oeste", "station_id": "EST005", "sector": "C", "bcch_before": 121, "bcch_after": 121, "bcch_changed": false, "tch_before": [123], "tch_after": [123], "tch_changed": false, "is_changed": false}], "violations": [{"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 114, "freq_b": 114, "ho": 1800, "dist": 1.09, "cost": 1081999.0, "severity": "high"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST003C", "freq_a": 122, "freq_b": 122, "ho": 1500, "dist": 1.09, "cost": 1055698.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 101, "freq_b": 102, "ho": 1100, "dist": 2.3, "cost": 1011268.2, "severity": "critical"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 102, "freq_b": 102, "ho": 800, "dist": 1.59, "cost": 965048.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 101, "freq_b": 100, "ho": 700, "dist": 2.15, "cost": 946083.3, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 113, "freq_b": 112, "ho": 450, "dist": 2.3, "cost": 882403.7, "severity": "critical"}, {"type": "Cocanal", "channel_types": "BCCH-BCCH", "cell_a": "EST002C", "cell_b": "EST005C", "freq_a": 121, "freq_b": 121, "ho": 350, "dist": 1.31, "cost": 846378.3, "severity": "critical"}, {"type": "Adyacente", "channel_types": "BCCH-BCCH", "cell_a": "EST004C", "cell_b": "EST005C", "freq_a": 120, "freq_b": 121, "ho": 250, "dist": 2.97, "cost": 797792.1, "severity": "critical"}, {"type": "Cocanal", "channel_types": "TCH-BCCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 105, "freq_b": 105, "ho": 200, "dist": 1.31, "cost": 765487.7, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 102, "freq_b": 101, "ho": 1200, "dist": 1.05, "cost": 306.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 103, "freq_b": 102, "ho": 1100, "dist": 2.3, "cost": 303.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 122, "freq_b": 121, "ho": 900, "dist": 1.05, "cost": 294.5, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 105, "ho": 900, "dist": 2.97, "cost": 294.5, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 114, "freq_b": 113, "ho": 600, "dist": 1.05, "cost": 276.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 115, "ho": 600, "dist": 2.97, "cost": 276.9, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 104, "freq_b": 105, "ho": 500, "dist": 1.37, "cost": 269.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 105, "ho": 500, "dist": 1.37, "cost": 269.1, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 114, "freq_b": 115, "ho": 400, "dist": 1.37, "cost": 259.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 115, "ho": 400, "dist": 1.37, "cost": 259.4, "severity": "high"}, {"type": "Adyacente", "channel_types": "TCH-BCCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 122, "freq_b": 121, "ho": 300, "dist": 1.37, "cost": 247.0, "severity": "high"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 104, "freq_b": 104, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 106, "freq_b": 106, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST003A", "freq_a": 108, "freq_b": 108, "ho": 2500, "dist": 1.09, "cost": 112.9, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 116, "freq_b": 116, "ho": 1800, "dist": 1.09, "cost": 108.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST003B", "freq_a": 118, "freq_b": 118, "ho": 1800, "dist": 1.09, "cost": 108.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST003C", "freq_a": 124, "freq_b": 124, "ho": 1500, "dist": 1.09, "cost": 105.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003A", "cell_b": "EST004A", "freq_a": 106, "freq_b": 106, "ho": 1300, "dist": 1.49, "cost": 103.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003A", "cell_b": "EST004A", "freq_a": 108, "freq_b": 108, "ho": 1300, "dist": 1.49, "cost": 103.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 106, "freq_b": 106, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 108, "freq_b": 108, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST004A", "freq_a": 110, "freq_b": 110, "ho": 800, "dist": 1.59, "cost": 96.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003B", "cell_b": "EST004B", "freq_a": 116, "freq_b": 116, "ho": 550, "dist": 1.49, "cost": 91.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003B", "cell_b": "EST004B", "freq_a": 118, "freq_b": 118, "ho": 550, "dist": 1.49, "cost": 91.1, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST003C", "cell_b": "EST004C", "freq_a": 124, "freq_b": 124, "ho": 400, "dist": 1.49, "cost": 86.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002C", "cell_b": "EST005C", "freq_a": 123, "freq_b": 123, "ho": 350, "dist": 1.31, "cost": 84.6, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 107, "freq_b": 107, "ho": 200, "dist": 1.31, "cost": 76.5, "severity": "medium"}, {"type": "Cocanal", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST005A", "freq_a": 109, "freq_b": 109, "ho": 200, "dist": 1.31, "cost": 76.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 102, "freq_b": 103, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 104, "freq_b": 103, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 104, "freq_b": 105, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 106, "freq_b": 105, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 106, "freq_b": 107, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 108, "freq_b": 107, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 108, "freq_b": 109, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST002A", "freq_a": 110, "freq_b": 109, "ho": 1200, "dist": 1.05, "cost": 51.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 105, "freq_b": 106, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 107, "freq_b": 106, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 107, "freq_b": 108, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 109, "freq_b": 108, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST004A", "freq_a": 109, "freq_b": 110, "ho": 1100, "dist": 2.3, "cost": 50.5, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 122, "freq_b": 123, "ho": 900, "dist": 1.05, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST002C", "freq_a": 124, "freq_b": 123, "ho": 900, "dist": 1.05, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 107, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 107, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 109, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 109, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 111, "ho": 900, "dist": 2.97, "cost": 49.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 103, "freq_b": 104, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 105, "freq_b": 104, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 105, "freq_b": 106, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 107, "freq_b": 106, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 107, "freq_b": 108, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002A", "cell_b": "EST003A", "freq_a": 109, "freq_b": 108, "ho": 700, "dist": 2.15, "cost": 47.3, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 114, "freq_b": 115, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 116, "freq_b": 115, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 116, "freq_b": 117, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST002B", "freq_a": 118, "freq_b": 117, "ho": 600, "dist": 1.05, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 117, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 117, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 119, "ho": 600, "dist": 2.97, "cost": 46.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 106, "freq_b": 107, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 107, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 108, "freq_b": 109, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 109, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001A", "cell_b": "EST005A", "freq_a": 110, "freq_b": 111, "ho": 500, "dist": 1.37, "cost": 44.8, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 115, "freq_b": 116, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 117, "freq_b": 116, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST002B", "cell_b": "EST004B", "freq_a": 117, "freq_b": 118, "ho": 450, "dist": 2.3, "cost": 44.1, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 116, "freq_b": 117, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 117, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001B", "cell_b": "EST005B", "freq_a": 118, "freq_b": 119, "ho": 400, "dist": 1.37, "cost": 43.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 122, "freq_b": 123, "ho": 300, "dist": 1.37, "cost": 41.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST001C", "cell_b": "EST005C", "freq_a": 124, "freq_b": 123, "ho": 300, "dist": 1.37, "cost": 41.2, "severity": "medium"}, {"type": "Adyacente", "channel_types": "TCH-TCH", "cell_a": "EST004C", "cell_b": "EST005C", "freq_a": 124, "freq_b": 123, "ho": 250, "dist": 2.97, "cost": 39.9, "severity": "medium"}], "improvement_score": "+36.9%", "improvement_critical": "+50.0%", "improvement_violations": "+5.6%"}]};
+
+    let activeScenarioIndex = 0; // 0: Scenario 1, 1: Scenario 2, etc. (or -1 for baseline)
+
+    function init() {
+        document.getElementById('meta-date').innerText = data.metadata.generated_at;
+        document.getElementById('label-cells-summary').innerText = 
+            `${data.metadata.total_cells} celdas • ${data.metadata.total_relations} relaciones de vecindad • Rango ARFCN ${data.metadata.freq_range_start}-${data.metadata.freq_range_end}`;
+
+        // Methodology
+        const m = data.metadata.stat_model;
+        document.getElementById('stat-model-name').innerText = `📐 Modelo Estadístico: ${m.name}`;
+        document.getElementById('stat-model-formula').innerText = `Formulación: ${m.formula}`;
+        document.getElementById('stat-model-desc').innerText = m.description;
+        document.getElementById('stat-model-usage').innerText = `💡 Criterio de uso: ${m.usage}`;
+
+        renderScenarioTabs();
+        renderMatrixTable();
+        selectScenario(0); // Select first scenario by default
+    }
+
+    function renderScenarioTabs() {
+        const container = document.getElementById('scenario-tabs-container');
+        container.innerHTML = '';
+
+        // Baseline card
+        const base = data.baseline;
+        const baseCard = document.createElement('div');
+        baseCard.className = `scenario-card is-baseline ${activeScenarioIndex === -1 ? 'active' : ''}`;
+        baseCard.onclick = () => selectScenario(-1);
+        baseCard.innerHTML = `
+            <div class="title">🏛️ Plan Actual (Original)</div>
+            <div class="metric-score">${base.score.toFixed(1)}</div>
+            <div class="stats-row">
+                <span class="stat-pill">Críticas: ${base.critical_violations}</span>
+                <span class="stat-pill">Total Viol: ${base.total_violations}</span>
+            </div>
+        `;
+        container.appendChild(baseCard);
+
+        // Scenarios cards
+        data.scenarios.forEach((sc, idx) => {
+            const card = document.createElement('div');
+            card.className = `scenario-card ${activeScenarioIndex === idx ? 'active' : ''}`;
+            card.onclick = () => selectScenario(idx);
+
+            const recBadge = idx === 0 ? '<span class="badge-rec">Recomendado</span>' : '';
+            card.innerHTML = `
+                ${recBadge}
+                <div class="title">${sc.name}</div>
+                <div class="metric-score">${sc.score.toFixed(1)}</div>
+                <div class="stats-row">
+                    <span class="stat-pill">Críticas: ${sc.critical_violations}</span>
+                    <span class="stat-pill">Total: ${sc.total_violations}</span>
+                    <span class="stat-pill" style="color: var(--success); font-weight: bold;">${sc.improvement_score}</span>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    function selectScenario(index) {
+        activeScenarioIndex = index;
+        renderScenarioTabs();
+
+        const activePlan = index === -1 ? data.baseline : data.scenarios[index];
+        const base = data.baseline;
+
+        document.getElementById('active-scenario-title').innerText = activePlan.name;
+        document.getElementById('active-changed-count').innerText = `${activePlan.modified_cells} de ${activePlan.total_cells} celdas modificadas`;
+        document.getElementById('active-violations-title').innerText = activePlan.name;
+        document.getElementById('active-violations-count').innerText = `${activePlan.violations.length} violaciones`;
+
+        // Render KPI Cards
+        renderKpis(activePlan, base);
+
+        // Render Tables
+        renderCellsTable();
+        renderViolationsTable();
+    }
+
+    function renderKpis(plan, base) {
+        const container = document.getElementById('kpi-grid-container');
+
+        function diffHtml(newVal, oldVal, lowerIsBetter = true) {
+            if (activeScenarioIndex === -1) return '';
+            const diff = oldVal - newVal;
+            if (diff === 0) return '<div class="kpi-change change-neutral">Sin cambio</div>';
+            const isGood = lowerIsBetter ? (diff > 0) : (diff < 0);
+            const pct = oldVal > 0 ? ((Math.abs(diff) / oldVal) * 100).toFixed(1) : '0';
+            const sign = diff > 0 ? '-' : '+';
+            return `<div class="kpi-change ${isGood ? 'change-good' : 'change-bad'}">${sign}${Math.abs(diff)} (${pct}% ${isGood ? 'mejora' : 'degradación'})</div>`;
+        }
+
+        container.innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-title">Score Global (Coste)</div>
+                <div class="kpi-value">${plan.score.toFixed(1)}</div>
+                ${activeScenarioIndex !== -1 ? diffHtml(plan.score, base.score) : '<div class="kpi-change change-neutral">Línea base</div>'}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Violaciones Críticas (BCCH-BCCH)</div>
+                <div class="kpi-value" style="color: ${plan.critical_violations > 0 ? 'var(--danger)' : 'var(--success)'};">${plan.critical_violations}</div>
+                ${activeScenarioIndex !== -1 ? diffHtml(plan.critical_violations, base.critical_violations) : '<div class="kpi-change change-neutral">Línea base</div>'}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Total Violaciones</div>
+                <div class="kpi-value" style="color: ${plan.total_violations > 0 ? 'var(--warning)' : 'var(--success)'};">${plan.total_violations}</div>
+                ${activeScenarioIndex !== -1 ? diffHtml(plan.total_violations, base.total_violations) : '<div class="kpi-change change-neutral">Línea base</div>'}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Ponderación HO Cocanal</div>
+                <div class="kpi-value">${plan.cochannel_ho_weighted.toFixed(1)}</div>
+                ${activeScenarioIndex !== -1 ? diffHtml(plan.cochannel_ho_weighted, base.cochannel_ho_weighted) : '<div class="kpi-change change-neutral">Línea base</div>'}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Celdas Modificadas</div>
+                <div class="kpi-value" style="color: var(--accent-orange);">${plan.modified_cells} <span style="font-size: 14px; font-weight: normal; color: var(--text-muted);">/ ${plan.total_cells}</span></div>
+                <div class="kpi-change change-neutral">${((plan.modified_cells / plan.total_cells) * 100).toFixed(1)}% de la red</div>
+            </div>
+        `;
+    }
+
+    function renderMatrixTable() {
+        const tbody = document.getElementById('matrix-tbody');
+        const b = data.baseline;
+        const s1 = data.scenarios[0] || b;
+        const s2 = data.scenarios[1] || null;
+        const s3 = data.scenarios[2] || null;
+
+        const metrics = [
+            { name: "Score Global (Coste Total)", b: b.score.toFixed(1), s1: s1.score.toFixed(1), s2: s2 ? s2.score.toFixed(1) : "—", s3: s3 ? s3.score.toFixed(1) : "—", imp: s1.improvement_score },
+            { name: "Violaciones Críticas (BCCH-BCCH)", b: b.critical_violations, s1: s1.critical_violations, s2: s2 ? s2.critical_violations : "—", s3: s3 ? s3.critical_violations : "—", imp: s1.improvement_critical },
+            { name: "Total Violaciones (Cocanal + Adj)", b: b.total_violations, s1: s1.total_violations, s2: s2 ? s2.total_violations : "—", s3: s3 ? s3.total_violations : "—", imp: s1.improvement_violations },
+            { name: "Cocanalidad BCCH-BCCH", b: b.cochannel_bcch_bcch, s1: s1.cochannel_bcch_bcch, s2: s2 ? s2.cochannel_bcch_bcch : "—", s3: s3 ? s3.cochannel_bcch_bcch : "—", imp: "-" },
+            { name: "Cocanalidad BCCH-TCH", b: b.cochannel_bcch_tch, s1: s1.cochannel_bcch_tch, s2: s2 ? s2.cochannel_bcch_tch : "—", s3: s3 ? s3.cochannel_bcch_tch : "—", imp: "-" },
+            { name: "Cocanalidad TCH-TCH", b: b.cochannel_tch_tch, s1: s1.cochannel_tch_tch, s2: s2 ? s2.cochannel_tch_tch : "—", s3: s3 ? s3.cochannel_tch_tch : "—", imp: "-" },
+            { name: "Adyacencia BCCH-BCCH", b: b.adjacent_bcch_bcch, s1: s1.adjacent_bcch_bcch, s2: s2 ? s2.adjacent_bcch_bcch : "—", s3: s3 ? s3.adjacent_bcch_bcch : "—", imp: "-" },
+            { name: "Adyacencia BCCH-TCH", b: b.adjacent_bcch_tch, s1: s1.adjacent_bcch_tch, s2: s2 ? s2.adjacent_bcch_tch : "—", s3: s3 ? s3.adjacent_bcch_tch : "—", imp: "-" },
+            { name: "Adyacencia TCH-TCH", b: b.adjacent_tch_tch, s1: s1.adjacent_tch_tch, s2: s2 ? s2.adjacent_tch_tch : "—", s3: s3 ? s3.adjacent_tch_tch : "—", imp: "-" },
+            { name: "Ponderación HO Cocanal", b: b.cochannel_ho_weighted.toFixed(1), s1: s1.cochannel_ho_weighted.toFixed(1), s2: s2 ? s2.cochannel_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.cochannel_ho_weighted.toFixed(1) : "—", imp: "-" },
+            { name: "Ponderación HO Adyacente", b: b.adjacent_ho_weighted.toFixed(1), s1: s1.adjacent_ho_weighted.toFixed(1), s2: s2 ? s2.adjacent_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.adjacent_ho_weighted.toFixed(1) : "—", imp: "-" },
+            { name: "Conflictos Misma Estación", b: b.same_station, s1: s1.same_station, s2: s2 ? s2.same_station : "—", s3: s3 ? s3.same_station : "—", imp: "-" },
+            { name: "Celdas Modificadas", b: "0", s1: `${s1.modified_cells} (${((s1.modified_cells/b.total_cells)*100).toFixed(1)}%)`, s2: s2 ? `${s2.modified_cells}` : "—", s3: s3 ? `${s3.modified_cells}` : "—", imp: "-" }
+        ];
+
+        tbody.innerHTML = metrics.map(m => `
+            <tr>
+                <td style="font-weight: 600;">${m.name}</td>
+                <td class="font-mono" style="color: var(--text-muted);">${m.b}</td>
+                <td class="font-mono" style="color: var(--primary); font-weight: bold;">${m.s1}</td>
+                <td class="font-mono">${m.s2}</td>
+                <td class="font-mono">${m.s3}</td>
+                <td class="font-mono" style="color: ${m.imp.startsWith('+') ? 'var(--success)' : 'inherit'}; font-weight: bold;">${m.imp}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderCellsTable() {
+        const tbody = document.getElementById('cells-tbody');
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const search = document.getElementById('search-cells').value.toLowerCase().trim();
+        const onlyChanged = document.getElementById('toggle-only-changed').checked;
+
+        const filtered = plan.cells.filter(c => {
+            if (onlyChanged && !c.is_changed) return false;
+            if (search) {
+                const text = `${c.cell_id} ${c.station} ${c.station_id} ${c.sector}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 24px;">No se encontraron celdas con los filtros actuales.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(c => {
+            const bcchBefore = c.bcch_before !== null ? c.bcch_before : '—';
+            const bcchAfter = c.bcch_after !== null ? c.bcch_after : '—';
+            const bcchStyle = c.bcch_changed ? 'color: var(--danger); font-weight: bold;' : '';
+
+            const tchBefore = c.tch_before.length ? c.tch_before.join(', ') : '—';
+            const tchAfter = c.tch_after.length ? c.tch_after.join(', ') : '—';
+            const tchStyle = c.tch_changed ? 'color: var(--accent-blue); font-weight: bold;' : '';
+
+            const statusBadge = c.is_changed 
+                ? '<span class="badge-pill badge-warning">✓ Modificado</span>'
+                : '<span class="badge-pill" style="color: var(--text-dim);">Sin cambio</span>';
+
+            return `
+                <tr>
+                    <td style="font-weight: 700;">${c.cell_id}</td>
+                    <td>${c.station}</td>
+                    <td><span class="badge-pill" style="background: var(--bg-card);">${c.sector}</span></td>
+                    <td class="font-mono">${bcchBefore}</td>
+                    <td class="font-mono" style="${bcchStyle}">${bcchAfter}</td>
+                    <td class="font-mono" style="font-size: 12px;">${tchBefore}</td>
+                    <td class="font-mono" style="font-size: 12px; ${tchStyle}">${tchAfter}</td>
+                    <td>${statusBadge}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderViolationsTable() {
+        const tbody = document.getElementById('violations-tbody');
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const search = document.getElementById('search-viol').value.toLowerCase().trim();
+
+        const filtered = plan.violations.filter(v => {
+            if (search) {
+                const text = `${v.cell_a} ${v.cell_b} ${v.type} ${v.channel_types}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--success); font-weight: bold; padding: 24px;">✅ No hay violaciones registradas en este plan.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(v => {
+            let badgeClass = 'badge-info';
+            if (v.severity === 'critical') badgeClass = 'badge-danger';
+            else if (v.severity === 'high') badgeClass = 'badge-warning';
+
+            return `
+                <tr>
+                    <td><span class="badge-pill ${badgeClass}">${v.type} (${v.channel_types})</span></td>
+                    <td style="font-weight: 700;">${v.cell_a}</td>
+                    <td style="font-weight: 700;">${v.cell_b}</td>
+                    <td class="font-mono">${v.freq_a}</td>
+                    <td class="font-mono">${v.freq_b}</td>
+                    <td class="font-mono">${v.ho || '—'}</td>
+                    <td class="font-mono">${v.dist} km</td>
+                    <td class="font-mono" style="font-weight: bold; color: var(--danger);">${v.cost}</td>
+                    <td><span class="badge-pill ${badgeClass}">${v.severity.toUpperCase()}</span></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function toggleTheme() {
+        const html = document.documentElement;
+        const current = html.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+    }
+
+    function exportActiveCsv() {
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        let csv = "Cell_ID;Station;Sector;BCCH_Antes;BCCH_Despues;TCH_Antes;TCH_Despues;Modificado\n";
+
+        plan.cells.forEach(c => {
+            csv += `${c.cell_id};${c.station};${c.sector};${c.bcch_before || ''};${c.bcch_after || ''};${c.tch_before.join(',')};${c.tch_after.join(',')};${c.is_changed ? 'SI' : 'NO'}\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plan_${plan.name.replace(/[^a-zA-Z0-9]/g, '_')}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // Auto-init on load
+    window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

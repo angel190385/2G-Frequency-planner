@@ -20,7 +20,7 @@ from src.engine.optimizer import FrequencyOptimizer
 from src.io.data_loader import (
     load_cells, load_neighbors, load_handovers, export_results
 )
-from src.io.pdf_exporter import export_plan_pdf
+from src.io.html_exporter import export_plan_html
 from src.ui.styles import Colors
 from src.ui.widgets.cell_table import CellTableWidget
 from src.ui.widgets.neighbor_table import NeighborTableWidget
@@ -122,10 +122,10 @@ class MainWindow(QMainWindow):
         act_export.triggered.connect(self._export_results)
         file_menu.addAction(act_export)
 
-        act_export_pdf = QAction("📄 Exportar Informe PDF (3 Escenarios)...", self)
-        act_export_pdf.setShortcut("Ctrl+P")
-        act_export_pdf.triggered.connect(self._export_pdf)
-        file_menu.addAction(act_export_pdf)
+        act_export_html = QAction("🌐 Exportar Informe HTML Dinámico (3 Escenarios)...", self)
+        act_export_html.setShortcut("Ctrl+H")
+        act_export_html.triggered.connect(self._export_html)
+        file_menu.addAction(act_export_html)
 
         file_menu.addSeparator()
 
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         # ── Tab 4: Results ─────────────────────────────────────────
         self.result_widget = ResultComparisonWidget()
         self.result_widget.btn_export.clicked.connect(self._export_results)
-        self.result_widget.btn_export_pdf.clicked.connect(self._export_pdf)
+        self.result_widget.btn_export_html.clicked.connect(self._export_html)
         self.tabs.addTab(self.result_widget, "📈 Resultados")
 
         # ── Tab 5: Interactive Map ────────────────────────────────
@@ -811,26 +811,26 @@ class MainWindow(QMainWindow):
             if should_optimize:
                 self._run_calculation()
 
-    def _export_pdf(self):
-        """Export comprehensive statistical comparison report to PDF (comparing with 3 scenarios)."""
+    def _export_html(self):
+        """Export comprehensive statistical comparison report to dynamic HTML dashboard."""
         if not self.results:
             QMessageBox.warning(
                 self, "Sin resultados",
-                "Debes ejecutar el cálculo de frecuencias antes de generar el informe PDF."
+                "Debes ejecutar el cálculo de frecuencias antes de generar el informe HTML."
             )
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Informe PDF de Planificación",
-            "informe_plan_frecuencias_3_escenarios.pdf",
-            "Documentos PDF (*.pdf);;Todos (*)"
+            self, "Exportar Informe HTML Dinámico de Planificación",
+            "informe_plan_frecuencias_dashboard.html",
+            "Documentos HTML (*.html);;Todos (*)"
         )
 
         if not file_path:
             return
 
         try:
-            export_plan_pdf(
+            export_plan_html(
                 file_path=file_path,
                 cells=self.cells,
                 neighbor_graph=self.neighbor_graph,
@@ -839,22 +839,24 @@ class MainWindow(QMainWindow):
             )
 
             res = QMessageBox.information(
-                self, "Informe PDF Generado",
-                f"✅ Informe PDF generado correctamente con la comparativa de 3 escenarios:\n\n{file_path}\n\n"
-                f"¿Deseas abrir el archivo ahora?",
+                self, "Informe HTML Dinámico Generado",
+                f"✅ Informe HTML dinámico interactivo generado con éxito con la comparativa de 3 escenarios:\n\n{file_path}\n\n"
+                f"¿Deseas abrir el informe en tu navegador web ahora?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if res == QMessageBox.StandardButton.Yes:
-                try:
-                    os.startfile(file_path)
-                except Exception as open_err:
-                    QMessageBox.warning(self, "Aviso", f"No se pudo abrir automáticamente el archivo: {open_err}")
+                import webbrowser
+                webbrowser.open("file:///" + os.path.abspath(file_path).replace("\\", "/"))
 
         except Exception as e:
             QMessageBox.critical(
-                self, "Error al generar PDF",
-                f"Se produjo un error al generar el informe PDF:\n\n{str(e)}"
+                self, "Error al generar HTML",
+                f"Se produjo un error al generar el informe HTML dinámico:\n\n{str(e)}"
             )
+
+    def _export_pdf(self):
+        """Backward compatibility alias directing to _export_html."""
+        self._export_html()
 
     def _show_about(self):
         """Show about dialog."""

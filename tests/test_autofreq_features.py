@@ -24,7 +24,7 @@ from src.engine.spectrum_manager import (
 )
 from src.engine.optimizer import FrequencyOptimizer
 from src.io.data_loader import load_cells, load_neighbors, load_handovers
-from src.io.pdf_exporter import export_plan_pdf, generate_baseline_plan
+from src.io.html_exporter import export_plan_html, generate_baseline_plan
 
 
 class TestAutofreqFeatures(unittest.TestCase):
@@ -166,8 +166,8 @@ class TestAutofreqFeatures(unittest.TestCase):
             for f in cell.tch_list:
                 self.assertNotIn(f, disappearing_set, f"Cell {cid} still has disappearing TCH {f}")
 
-    def test_pdf_export_3_scenarios(self):
-        """Test PDF generation comparing baseline with 3 calculated scenarios."""
+    def test_html_export_3_scenarios(self):
+        """Test dynamic HTML dashboard generation comparing baseline with 3 calculated scenarios."""
         rules = FrequencyRules()
         rules.population_size = 20
         rules.num_generations = 10
@@ -185,23 +185,30 @@ class TestAutofreqFeatures(unittest.TestCase):
 
         self.assertGreaterEqual(len(results), 1)
 
-        pdf_path = os.path.join(self.test_data_dir, 'test_output_report.pdf')
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+        html_path = os.path.join(self.test_data_dir, 'test_output_report.html')
+        if os.path.exists(html_path):
+            os.remove(html_path)
 
-        export_plan_pdf(
-            file_path=pdf_path,
+        export_plan_html(
+            file_path=html_path,
             cells=cells_calc,
             neighbor_graph=self.neighbor_graph,
             rules=rules,
             results=results
         )
 
-        self.assertTrue(os.path.exists(pdf_path))
-        self.assertGreater(os.path.getsize(pdf_path), 1000)
+        self.assertTrue(os.path.exists(html_path))
+        self.assertGreater(os.path.getsize(html_path), 5000)
+
+        with open(html_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            self.assertIn("<!DOCTYPE html>", content)
+            self.assertIn("const data =", content)
+            self.assertIn("selectScenario", content)
+            self.assertIn("renderMatrixTable", content)
 
         # Clean up
-        os.remove(pdf_path)
+        os.remove(html_path)
 
 
 if __name__ == '__main__':

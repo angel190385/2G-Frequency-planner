@@ -338,20 +338,25 @@ class ResultComparisonWidget(QWidget):
         self.btn_export.setEnabled(False)
         header_layout.addWidget(self.btn_export)
 
-        self.btn_export_pdf = QPushButton("📄 Exportar Informe PDF (3 Escenarios)")
-        self.btn_export_pdf.setObjectName("btn_primary")
-        self.btn_export_pdf.setStyleSheet("""
+        self.btn_export_html = QPushButton("🌐 Exportar Informe HTML Dinámico (3 Escenarios)")
+        self.btn_export_html.setObjectName("btn_primary")
+        self.btn_export_html.setStyleSheet("""
             QPushButton {
-                background-color: #0984e3;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00b894, stop:1 #0984e3);
                 color: white;
                 font-weight: bold;
-                padding: 6px 14px;
+                padding: 6px 16px;
                 border-radius: 4px;
+                font-size: 13px;
             }
-            QPushButton:hover { background-color: #74b9ff; }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #55efc4, stop:1 #74b9ff);
+                color: #2d3436;
+            }
         """)
-        self.btn_export_pdf.setEnabled(False)
-        header_layout.addWidget(self.btn_export_pdf)
+        self.btn_export_html.setEnabled(False)
+        self.btn_export_pdf = self.btn_export_html  # Alias for backward compatibility
+        header_layout.addWidget(self.btn_export_html)
 
         layout.addLayout(header_layout)
 
@@ -369,11 +374,11 @@ class ResultComparisonWidget(QWidget):
         if not results:
             self.lbl_status.setText("Sin resultados")
             self.btn_export.setEnabled(False)
-            self.btn_export_pdf.setEnabled(False)
+            self.btn_export_html.setEnabled(False)
             return
 
         self.btn_export.setEnabled(True)
-        self.btn_export_pdf.setEnabled(True)
+        self.btn_export_html.setEnabled(True)
 
         per_run = getattr(results, "per_run", {})
         num_runs = len(per_run)

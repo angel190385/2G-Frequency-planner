@@ -372,9 +372,7 @@ class FrequencyOptimizer:
             result = evaluate_plan(
                 assignments, self.cells, self.neighbor_graph, self.rules, plan_id=1, run_id=1
             )
-            res_list = [result]
-            res_list.per_run = {1: [result]}
-            return res_list
+            return OptimizationResultList([result], per_run={1: [result]})
 
         pop_size = self.rules.population_size
         n_gen = self.rules.num_generations
