@@ -119,6 +119,56 @@ def _calc_improvement(old_val: float, new_val: float) -> str:
     return f"+{pct:.1f}%" if pct > 0 else f"{pct:.1f}%"
 
 
+def _compute_channel_stats(plan: PlanResult, cells: dict[str, Cell]) -> dict[str, dict]:
+    """Calculate frequency-level aggregated statistics for a plan."""
+    assign_map = {a.cell_id: a for a in plan.assignments}
+    stats: dict[int, dict] = {}
+
+    def get_entry(freq: int) -> dict:
+        if freq not in stats:
+            stats[freq] = {
+                "freq": freq,
+                "bcch_count": 0,
+                "tch_count": 0,
+                "total_count": 0,
+                "cochannel_conflicts": 0,
+                "adjacent_conflicts": 0,
+                "total_conflicts": 0,
+                "conflict_cost": 0.0,
+                "cells": []
+            }
+        return stats[freq]
+
+    for cid, a in assign_map.items():
+        cell = cells.get(cid)
+        st_name = cell.station.name if cell and cell.station else ""
+        sector = cell.sector if cell else ""
+        if a.bcch and a.bcch > 0:
+            e = get_entry(a.bcch)
+            e["bcch_count"] += 1
+            e["total_count"] += 1
+            e["cells"].append({"cell_id": cid, "role": "BCCH", "station": st_name, "sector": sector})
+        for f in a.tch_list:
+            if f and f > 0:
+                e = get_entry(f)
+                e["tch_count"] += 1
+                e["total_count"] += 1
+                e["cells"].append({"cell_id": cid, "role": "TCH", "station": st_name, "sector": sector})
+
+    for v in plan.violations:
+        for f in (v.freq_a, v.freq_b):
+            if f and f > 0:
+                e = get_entry(f)
+                if v.violation_type == "cochannel":
+                    e["cochannel_conflicts"] += 1
+                else:
+                    e["adjacent_conflicts"] += 1
+                e["total_conflicts"] += 1
+                e["conflict_cost"] = round(e["conflict_cost"] + (v.weighted_cost / 2.0), 1)
+
+    return {str(k): v for k, v in sorted(stats.items())}
+
+
 def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
     assign_map = {a.cell_id: a for a in plan.assignments}
 
@@ -174,6 +224,8 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
             "severity": "critical" if both == "BCCH-BCCH" else ("high" if "BCCH" in both else "medium")
         })
 
+    channel_stats = _compute_channel_stats(plan, cells)
+
     return {
         "id": plan.plan_id,
         "name": name,
@@ -192,7 +244,8 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
         "modified_cells": modified_cells,
         "total_cells": len(cells),
         "cells": cell_details,
-        "violations": violations_data
+        "violations": violations_data,
+        "channel_stats": channel_stats
     }
 
 
@@ -217,6 +270,15 @@ def _build_payload(
         sc_dict["improvement_violations"] = _calc_improvement(baseline.total_violations, sc.total_violations)
         scenarios_dicts.append(sc_dict)
 
+    # Collect comprehensive set of all observed and configured channels
+    all_channels_set = set(range(rules.freq_range_start, rules.freq_range_end + 1))
+    if rules.available_frequencies:
+        all_channels_set.update(rules.available_frequencies)
+    all_channels_set.update(int(k) for k in baseline_dict["channel_stats"].keys())
+    for sc in scenarios_dicts:
+        all_channels_set.update(int(k) for k in sc["channel_stats"].keys())
+    all_channels = sorted(all_channels_set)
+
     return {
         "metadata": {
             "title": "Informe de Planificación y Optimización de Frecuencias GSM 2G",
@@ -228,6 +290,7 @@ def _build_payload(
             "freq_range_end": rules.freq_range_end,
             "available_freqs": len(rules.available_frequencies),
             "excluded_freqs": rules.excluded_frequencies,
+            "all_channels": all_channels,
             "stat_model": stat_info,
             "ho_stats": ho_stats,
             "population_size": rules.population_size,
@@ -689,6 +752,160 @@ def _build_html_template(payload: dict) -> str:
             border: 1px solid var(--border);
         }}
 
+        /* Channel Analytics Panel */
+        .channel-controls-bar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            background: var(--bg-card);
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }}
+
+        .metric-pill-group {{
+            display: inline-flex;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3px;
+            gap: 2px;
+        }}
+
+        .metric-pill {{
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+
+        .metric-pill:hover {{
+            color: var(--text-main);
+        }}
+
+        .metric-pill.active {{
+            color: #ffffff;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }}
+
+        .metric-pill.active[data-metric="total"] {{
+            background: linear-gradient(135deg, #00d4aa 0%, #00a884 100%);
+            color: #07251e;
+        }}
+
+        .metric-pill.active[data-metric="bcch"] {{
+            background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
+            color: #ffffff;
+        }}
+
+        .metric-pill.active[data-metric="tch"] {{
+            background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            color: #ffffff;
+        }}
+
+        .metric-pill.active[data-metric="violations"] {{
+            background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+            color: #ffffff;
+        }}
+
+        .select-styled {{
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+            outline: none;
+            cursor: pointer;
+        }}
+
+        .select-styled:focus {{
+            border-color: var(--primary);
+        }}
+
+        .chart-container-box {{
+            position: relative;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 16px 16px 8px 16px;
+            min-height: 250px;
+        }}
+
+        .chart-canvas {{
+            display: block;
+            width: 100%;
+            height: 230px;
+            cursor: crosshair;
+        }}
+
+        .chart-tooltip {{
+            position: absolute;
+            display: none;
+            pointer-events: none;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            font-size: 12px;
+            color: #f8fafc;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            white-space: nowrap;
+        }}
+
+        .channel-kpis-row {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 14px;
+        }}
+
+        .mini-kpi-card {{
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }}
+
+        .mini-kpi-title {{
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .mini-kpi-val {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+        }}
+
+        .channel-inspector-card {{
+            margin-top: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            display: none;
+        }}
+
         /* Print Style */
         @media print {{
             body {{
@@ -768,6 +985,106 @@ def _build_html_template(payload: dict) -> str:
                 </thead>
                 <tbody id="matrix-tbody"></tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- Channel Usage & Coincidence Analytics (Interactive Bar Chart) -->
+    <div class="panel" style="margin-bottom: 24px;">
+        <div class="panel-header">
+            <div class="panel-title">📊 Estadística Agregada y Coincidencias por Canal (ARFCN)</div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge-pill badge-info" id="channel-summary-badge">Rango de Canales</span>
+                <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChannelTable()">📋 Ver / Ocultar Tabla</button>
+            </div>
+        </div>
+
+        <div class="channel-controls-bar">
+            <!-- Metric selector pills -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Métrica:</span>
+                <div class="metric-pill-group">
+                    <button class="metric-pill active" data-metric="total" onclick="setChannelMetric('total')">🔵 Coincidencias Totales</button>
+                    <button class="metric-pill" data-metric="bcch" onclick="setChannelMetric('bcch')">🟣 Solo BCCH</button>
+                    <button class="metric-pill" data-metric="tch" onclick="setChannelMetric('tch')">🔷 Solo TCH</button>
+                    <button class="metric-pill" data-metric="violations" onclick="setChannelMetric('violations')">🔴 Conflictos / Coste</button>
+                </div>
+            </div>
+
+            <!-- View mode & Filter selectors -->
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 12px; color: var(--text-muted);">Modo:</span>
+                    <select id="channel-compare-mode" class="select-styled" onchange="setChannelCompareMode(this.value)">
+                        <option value="single">Escenario Seleccionado</option>
+                        <option value="compare">Comparar con Plan Actual (Línea Base)</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 12px; color: var(--text-muted);">Filtro:</span>
+                    <select id="channel-filter-mode" class="select-styled" onchange="setChannelFilter(this.value)">
+                        <option value="all">Todos los Canales</option>
+                        <option value="used">Solo Canales en Uso (>0)</option>
+                        <option value="conflicts">Solo con Conflictos</option>
+                        <option value="top10">Top 10 más Usados</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Canvas Chart Box -->
+        <div class="chart-container-box" id="chart-wrapper">
+            <canvas id="channel-canvas" class="chart-canvas"></canvas>
+            <div id="chart-tooltip" class="chart-tooltip"></div>
+        </div>
+
+        <!-- Mini KPI Row -->
+        <div class="channel-kpis-row">
+            <div class="mini-kpi-card">
+                <span class="mini-kpi-title">Canales en Uso</span>
+                <span class="mini-kpi-val" id="mini-kpi-used">0</span>
+            </div>
+            <div class="mini-kpi-card">
+                <span class="mini-kpi-title">Reuso Máximo (Pico)</span>
+                <span class="mini-kpi-val" id="mini-kpi-peak" style="color: var(--accent-orange);">0</span>
+            </div>
+            <div class="mini-kpi-card">
+                <span class="mini-kpi-title">Reuso Medio por Canal</span>
+                <span class="mini-kpi-val" id="mini-kpi-avg" style="color: var(--primary);">0</span>
+            </div>
+            <div class="mini-kpi-card">
+                <span class="mini-kpi-title">Canales Libres / Vacantes</span>
+                <span class="mini-kpi-val" id="mini-kpi-free" style="color: var(--accent-blue);">0</span>
+            </div>
+        </div>
+
+        <!-- Inspector Card (Click on channel) -->
+        <div class="channel-inspector-card" id="channel-inspector">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h4 style="font-size: 14px; font-weight: 700; color: var(--primary);" id="inspector-title">Detalle del Canal</h4>
+                <button class="btn" style="padding: 2px 8px; font-size: 11px;" onclick="closeChannelInspector()">✕ Cerrar</button>
+            </div>
+            <div id="inspector-content" style="font-size: 12px; color: var(--text-muted);"></div>
+        </div>
+
+        <!-- Collapsible Aggregate Table -->
+        <div id="channel-table-collapse" style="display: none; margin-top: 16px;">
+            <div class="data-table-wrap" style="max-height: 320px; overflow-y: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Canal (ARFCN)</th>
+                            <th>Usos BCCH</th>
+                            <th>Usos TCH</th>
+                            <th>Coincidencias Totales</th>
+                            <th>Conflictos Cocanal</th>
+                            <th>Conflictos Adyacente</th>
+                            <th>Coste Ponderado</th>
+                            <th>Celdas Asignadas</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channel-table-tbody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -856,6 +1173,7 @@ def _build_html_template(payload: dict) -> str:
         document.getElementById('stat-model-desc').innerText = m.description;
         document.getElementById('stat-model-usage').innerText = `💡 Criterio de uso: ${{m.usage}}`;
 
+        setupCanvasEvents();
         renderScenarioTabs();
         renderMatrixTable();
         selectScenario(0); // Select first scenario by default
@@ -915,6 +1233,7 @@ def _build_html_template(payload: dict) -> str:
 
         // Render KPI Cards
         renderKpis(activePlan, base);
+        renderChannelAnalytics();
 
         // Render Tables
         renderCellsTable();
@@ -1107,6 +1426,409 @@ def _build_html_template(payload: dict) -> str:
         a.download = `plan_${{plan.name.replace(/[^a-zA-Z0-9]/g, '_')}}.csv`;
         a.click();
         URL.revokeObjectURL(url);
+    }}
+
+    // ── Channel Analytics Functions ──────────────────────────────
+    let currentChannelMetric = 'total';
+    let channelCompareMode = 'single';
+    let channelFilterMode = 'all';
+    let selectedChannelDetail = null;
+    let channelBarsHitMap = [];
+
+    function setChannelMetric(metric) {{
+        currentChannelMetric = metric;
+        document.querySelectorAll('.metric-pill').forEach(btn => {{
+            btn.classList.toggle('active', btn.getAttribute('data-metric') === metric);
+        }});
+        renderChannelAnalytics();
+    }}
+
+    function setChannelCompareMode(mode) {{
+        channelCompareMode = mode;
+        renderChannelAnalytics();
+    }}
+
+    function setChannelFilter(mode) {{
+        channelFilterMode = mode;
+        renderChannelAnalytics();
+    }}
+
+    function toggleChannelTable() {{
+        const wrap = document.getElementById('channel-table-collapse');
+        wrap.style.display = (wrap.style.display === 'none') ? 'block' : 'none';
+    }}
+
+    function closeChannelInspector() {{
+        document.getElementById('channel-inspector').style.display = 'none';
+        selectedChannelDetail = null;
+        renderChannelAnalytics();
+    }}
+
+    function showChannelDetail(ch) {{
+        selectedChannelDetail = ch;
+        const inspector = document.getElementById('channel-inspector');
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const stat = plan.channel_stats[String(ch)] || {{ bcch_count: 0, tch_count: 0, total_count: 0, total_conflicts: 0, conflict_cost: 0, cells: [] }};
+        
+        document.getElementById('inspector-title').innerText = `📡 ARFCN ${{ch}} — Detalle de Uso y Celdas Asignadas`;
+        
+        if (!stat.cells || stat.cells.length === 0) {{
+            document.getElementById('inspector-content').innerHTML = `
+                <p style="color: var(--text-dim); padding: 8px 0;">Este canal no se encuentra asignado a ninguna celda en el plan ${{plan.name}}.</p>
+            `;
+        }} else {{
+            const cellsHtml = stat.cells.map(c => `
+                <div style="background: var(--bg-surface); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; color: var(--text-main);">${{c.cell_id}}</span>
+                    <span style="color: var(--text-muted); font-size: 11px;">(${{c.station || 'Estación'}} - Sec ${{c.sector}})</span>
+                    <span class="badge-pill ${{c.role === 'BCCH' ? 'badge-info' : 'badge-warning'}}">${{c.role}}</span>
+                </div>
+            `).join(' ');
+
+            document.getElementById('inspector-content').innerHTML = `
+                <div style="margin-bottom: 8px; display: flex; gap: 16px; flex-wrap: wrap;">
+                    <span><strong>Total Usos:</strong> ${{stat.total_count}} (BCCH: ${{stat.bcch_count}}, TCH: ${{stat.tch_count}})</span>
+                    <span><strong>Conflictos:</strong> ${{stat.total_conflicts}}</span>
+                    <span><strong>Coste Ponderado:</strong> ${{stat.conflict_cost}}</span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 140px; overflow-y: auto; padding: 4px 0;">
+                    ${{cellsHtml}}
+                </div>
+            `;
+        }}
+        inspector.style.display = 'block';
+        renderChannelAnalytics();
+    }}
+
+    function _drawRoundRect(ctx, x, y, width, height, radius) {{
+        if (width < 2 * radius) radius = width / 2;
+        if (height < 2 * radius) radius = height / 2;
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.arcTo(x + width, y, x + width, y + height, radius);
+        ctx.arcTo(x + width, y + height, x, y + height, 0);
+        ctx.arcTo(x, y + height, x, y, 0);
+        ctx.arcTo(x, y, x + width, y, radius);
+        ctx.closePath();
+    }}
+
+    function renderChannelAnalytics() {{
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        const base = data.baseline;
+        const allChannels = data.metadata.all_channels || [];
+
+        // Filter channels
+        let channels = allChannels.slice();
+        if (channelFilterMode === 'used') {{
+            channels = channels.filter(ch => {{
+                const s = plan.channel_stats[String(ch)];
+                const b = base.channel_stats[String(ch)];
+                return (s && s.total_count > 0) || (channelCompareMode === 'compare' && b && b.total_count > 0);
+            }});
+        }} else if (channelFilterMode === 'conflicts') {{
+            channels = channels.filter(ch => {{
+                const s = plan.channel_stats[String(ch)];
+                const b = base.channel_stats[String(ch)];
+                return (s && s.total_conflicts > 0) || (channelCompareMode === 'compare' && b && b.total_conflicts > 0);
+            }});
+        }} else if (channelFilterMode === 'top10') {{
+            channels = channels.slice().sort((a, b) => {{
+                const sa = plan.channel_stats[String(a)] ? plan.channel_stats[String(a)].total_count : 0;
+                const sb = plan.channel_stats[String(b)] ? plan.channel_stats[String(b)].total_count : 0;
+                return sb - sa;
+            }}).slice(0, 10);
+        }}
+
+        // Summary Badge
+        document.getElementById('channel-summary-badge').innerText = 
+            `Mostrando ${{channels.length}} de ${{allChannels.length}} canales (${{plan.name}})`;
+
+        // Mini KPIs
+        let usedCount = 0;
+        let peakReusage = 0;
+        let peakChannel = null;
+        let totalReusage = 0;
+
+        allChannels.forEach(ch => {{
+            const s = plan.channel_stats[String(ch)];
+            const val = s ? s.total_count : 0;
+            if (val > 0) {{
+                usedCount++;
+                totalReusage += val;
+                if (val > peakReusage) {{
+                    peakReusage = val;
+                    peakChannel = ch;
+                }}
+            }}
+        }});
+
+        const freeCount = allChannels.length - usedCount;
+        const avgReusage = usedCount > 0 ? (totalReusage / usedCount).toFixed(1) : '0';
+
+        document.getElementById('mini-kpi-used').innerText = `${{usedCount}} / ${{allChannels.length}}`;
+        document.getElementById('mini-kpi-peak').innerText = peakChannel ? `${{peakReusage}} celdas (ARFCN ${{peakChannel}})` : '0';
+        document.getElementById('mini-kpi-avg').innerText = `${{avgReusage}} celdas/canal`;
+        document.getElementById('mini-kpi-free').innerText = `${{freeCount}} libres`;
+
+        // Canvas drawing
+        const canvas = document.getElementById('channel-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        const width = rect.width || canvas.parentElement.clientWidth || 800;
+        const height = 230;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.resetTransform();
+        ctx.scale(dpr, dpr);
+
+        channelBarsHitMap = [];
+
+        if (channels.length === 0) {{
+            ctx.fillStyle = '#64748b';
+            ctx.font = '14px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('No hay canales que coincidan con los filtros seleccionados.', width / 2, height / 2);
+            renderChannelTable(channels, plan);
+            return;
+        }}
+
+        // Extract values function
+        function getVal(p, ch) {{
+            const s = p.channel_stats[String(ch)];
+            if (!s) return 0;
+            if (currentChannelMetric === 'total') return s.total_count;
+            if (currentChannelMetric === 'bcch') return s.bcch_count;
+            if (currentChannelMetric === 'tch') return s.tch_count;
+            if (currentChannelMetric === 'violations') return s.total_conflicts;
+            return 0;
+        }}
+
+        // Find max value
+        let maxVal = 1;
+        channels.forEach(ch => {{
+            const v1 = getVal(plan, ch);
+            if (v1 > maxVal) maxVal = v1;
+            if (channelCompareMode === 'compare') {{
+                const v2 = getVal(base, ch);
+                if (v2 > maxVal) maxVal = v2;
+            }}
+        }});
+
+        maxVal = Math.ceil(maxVal * 1.15);
+        if (maxVal < 4) maxVal = 4;
+
+        const padLeft = 35;
+        const padRight = 15;
+        const padTop = 15;
+        const padBottom = 30;
+        const chartW = width - padLeft - padRight;
+        const chartH = height - padTop - padBottom;
+
+        // Grid lines (3-4 horizontal lines)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+
+        const gridSteps = 4;
+        for (let i = 0; i <= gridSteps; i++) {{
+            const yVal = Math.round((maxVal / gridSteps) * i);
+            const yPos = padTop + chartH - (i / gridSteps) * chartH;
+            ctx.beginPath();
+            ctx.moveTo(padLeft, yPos);
+            ctx.lineTo(padLeft + chartW, yPos);
+            ctx.stroke();
+            ctx.fillText(yVal, padLeft - 6, yPos + 3);
+        }}
+
+        // Palette per metric
+        const colors = {{
+            total: {{ c1: '#00d4aa', c2: '#00a884', glow: 'rgba(0, 212, 170, 0.3)' }},
+            bcch: {{ c1: '#a855f7', c2: '#7e22ce', glow: 'rgba(168, 85, 247, 0.3)' }},
+            tch: {{ c1: '#38bdf8', c2: '#0284c7', glow: 'rgba(56, 189, 248, 0.3)' }},
+            violations: {{ c1: '#f43f5e', c2: '#be123c', glow: 'rgba(244, 63, 94, 0.3)' }}
+        }}[currentChannelMetric];
+
+        const slotW = chartW / channels.length;
+        const isCompare = (channelCompareMode === 'compare' && activeScenarioIndex !== -1);
+
+        channels.forEach((ch, idx) => {{
+            const slotX = padLeft + idx * slotW;
+            const valPlan = getVal(plan, ch);
+            const valBase = getVal(base, ch);
+
+            if (!isCompare) {{
+                // Single bar
+                const barW = Math.max(3, Math.min(24, slotW * 0.7));
+                const barX = slotX + (slotW - barW) / 2;
+                const barH = (valPlan / maxVal) * chartH;
+                const barY = padTop + chartH - barH;
+
+                if (barH > 0) {{
+                    const grad = ctx.createLinearGradient(0, barY, 0, barY + barH);
+                    grad.addColorStop(0, colors.c1);
+                    grad.addColorStop(1, colors.c2);
+                    ctx.fillStyle = grad;
+                    _drawRoundRect(ctx, barX, barY, barW, barH, Math.min(3, barW / 2));
+                    ctx.fill();
+
+                    if (ch === selectedChannelDetail) {{
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }}
+                }}
+
+                channelBarsHitMap.push({{
+                    ch: ch,
+                    x: slotX,
+                    w: slotW,
+                    valPlan: valPlan,
+                    valBase: valBase,
+                    isCompare: false
+                }});
+
+            }} else {{
+                // Double grouped bar
+                const barW = Math.max(2, Math.min(12, (slotW * 0.8) / 2));
+                const barX1 = slotX + (slotW - barW * 2 - 2) / 2;
+                const barX2 = barX1 + barW + 2;
+
+                const barH1 = (valBase / maxVal) * chartH;
+                const barY1 = padTop + chartH - barH1;
+                const barH2 = (valPlan / maxVal) * chartH;
+                const barY2 = padTop + chartH - barH2;
+
+                // Base bar (Muted gray)
+                if (barH1 > 0) {{
+                    ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
+                    _drawRoundRect(ctx, barX1, barY1, barW, barH1, Math.min(2, barW / 2));
+                    ctx.fill();
+                }}
+
+                // Active bar (Vivid)
+                if (barH2 > 0) {{
+                    const grad = ctx.createLinearGradient(0, barY2, 0, barY2 + barH2);
+                    grad.addColorStop(0, colors.c1);
+                    grad.addColorStop(1, colors.c2);
+                    ctx.fillStyle = grad;
+                    _drawRoundRect(ctx, barX2, barY2, barW, barH2, Math.min(2, barW / 2));
+                    ctx.fill();
+
+                    if (ch === selectedChannelDetail) {{
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }}
+                }}
+
+                channelBarsHitMap.push({{
+                    ch: ch,
+                    x: slotX,
+                    w: slotW,
+                    valPlan: valPlan,
+                    valBase: valBase,
+                    isCompare: true
+                }});
+            }}
+
+            // X-Axis channel labels
+            const showEvery = slotW < 16 ? (slotW < 8 ? 5 : 2) : 1;
+            if (idx % showEvery === 0) {{
+                ctx.fillStyle = (ch === selectedChannelDetail) ? 'var(--primary)' : '#94a3b8';
+                ctx.font = (ch === selectedChannelDetail) ? 'bold 10px JetBrains Mono' : '9px JetBrains Mono';
+                ctx.textAlign = 'center';
+                ctx.fillText(ch, slotX + slotW / 2, height - 10);
+            }}
+        }});
+
+        renderChannelTable(channels, plan);
+    }}
+
+    function setupCanvasEvents() {{
+        const canvas = document.getElementById('channel-canvas');
+        const tooltip = document.getElementById('chart-tooltip');
+        if (!canvas || !tooltip) return;
+
+        canvas.addEventListener('mousemove', (e) => {{
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const hit = channelBarsHitMap.find(b => mouseX >= b.x && mouseX < b.x + b.w);
+            if (!hit) {{
+                tooltip.style.display = 'none';
+                return;
+            }}
+
+            const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+            const stat = plan.channel_stats[String(hit.ch)] || {{ bcch_count: 0, tch_count: 0, total_count: 0, total_conflicts: 0 }};
+
+            let diffText = '';
+            if (hit.isCompare) {{
+                const diff = hit.valPlan - hit.valBase;
+                const sign = diff > 0 ? '+' : '';
+                diffText = `<div style="font-size: 11px; margin-top: 4px; color: ${{diff <= 0 ? 'var(--success)' : 'var(--danger)'}};">Plan Actual: ${{hit.valBase}} → ${{plan.name}}: ${{hit.valPlan}} (${{sign}}${{diff}})</div>`;
+            }}
+
+            tooltip.innerHTML = `
+                <div style="font-weight: 700; color: var(--primary); font-size: 13px; margin-bottom: 4px;">📡 ARFCN ${{hit.ch}}</div>
+                <div><strong>Coincidencias:</strong> ${{stat.total_count}} (BCCH: ${{stat.bcch_count}}, TCH: ${{stat.tch_count}})</div>
+                <div><strong>Conflictos:</strong> ${{stat.total_conflicts}}</div>
+                ${{diffText}}
+                <div style="font-size: 10px; color: var(--text-dim); margin-top: 4px;">👉 Haz clic para ver celdas asignadas</div>
+            `;
+
+            let left = mouseX + 16;
+            if (left + 220 > rect.width) left = mouseX - 230;
+            tooltip.style.left = `${{left}}px`;
+            tooltip.style.top = `${{Math.max(10, mouseY - 50)}}px`;
+            tooltip.style.display = 'block';
+        }});
+
+        canvas.addEventListener('mouseleave', () => {{
+            tooltip.style.display = 'none';
+        }});
+
+        canvas.addEventListener('click', (e) => {{
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const hit = channelBarsHitMap.find(b => mouseX >= b.x && mouseX < b.x + b.w);
+            if (hit) {{
+                showChannelDetail(hit.ch);
+            }}
+        }});
+
+        window.addEventListener('resize', () => {{
+            renderChannelAnalytics();
+        }});
+    }}
+
+    function renderChannelTable(channels, plan) {{
+        const tbody = document.getElementById('channel-table-tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = channels.map(ch => {{
+            const s = plan.channel_stats[String(ch)] || {{ bcch_count: 0, tch_count: 0, total_count: 0, cochannel_conflicts: 0, adjacent_conflicts: 0, conflict_cost: 0, cells: [] }};
+            const cellsList = s.cells.map(c => `${{c.cell_id}} (${{c.role}})`).join(', ') || '—';
+
+            return `
+                <tr>
+                    <td class="font-mono" style="font-weight: 700; color: var(--primary); cursor: pointer;" onclick="showChannelDetail(${{ch}})">📡 ${{ch}}</td>
+                    <td class="font-mono">${{s.bcch_count}}</td>
+                    <td class="font-mono">${{s.tch_count}}</td>
+                    <td class="font-mono" style="font-weight: bold; color: ${{s.total_count > 0 ? 'var(--text-main)' : 'var(--text-dim)'}};">${{s.total_count}}</td>
+                    <td class="font-mono" style="color: ${{s.cochannel_conflicts > 0 ? 'var(--danger)' : 'inherit'}};">${{s.cochannel_conflicts}}</td>
+                    <td class="font-mono" style="color: ${{s.adjacent_conflicts > 0 ? 'var(--warning)' : 'inherit'}};">${{s.adjacent_conflicts}}</td>
+                    <td class="font-mono">${{s.conflict_cost}}</td>
+                    <td style="font-size: 11px; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${{cellsList}}</td>
+                </tr>
+            `;
+        }}).join('');
     }}
 
     // Auto-init on load
