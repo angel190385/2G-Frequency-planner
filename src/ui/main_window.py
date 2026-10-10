@@ -614,7 +614,7 @@ class MainWindow(QMainWindow):
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""
-        dialog = RulesDialog(self.rules, self)
+        dialog = RulesDialog(self.rules, cells=self.cells, results=self.results, parent=self)
         if dialog.exec() == RulesDialog.DialogCode.Accepted:
             self.rules = dialog.get_rules()
             self._update_status()
@@ -790,6 +790,7 @@ class MainWindow(QMainWindow):
             cells=self.cells,
             neighbor_graph=self.neighbor_graph,
             rules=self.rules,
+            results=self.results,
             parent=self
         )
 

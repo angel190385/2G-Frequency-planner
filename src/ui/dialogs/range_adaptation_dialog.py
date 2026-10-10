@@ -42,12 +42,14 @@ class RangeAdaptationDialog(QDialog):
         cells: dict[str, Cell],
         neighbor_graph: NeighborGraph,
         rules: FrequencyRules,
+        results: Optional[list] = None,
         parent=None
     ):
         super().__init__(parent)
         self.cells = cells
         self.neighbor_graph = neighbor_graph
         self.rules = rules
+        self.results = results
         self.analysis: Optional[SpectrumShiftAnalysis] = None
         self.applied_mode: Optional[str] = None
 
@@ -97,30 +99,46 @@ class RangeAdaptationDialog(QDialog):
         self.txt_init_excluded.setPlaceholderText("Ej: 105, 110")
         rg_layout.addWidget(self.txt_init_excluded, 1, 5)
 
-        btn_detect = QPushButton("🔍 Detectar del Plan")
-        btn_detect.setToolTip("Detectar rango mínimo y máximo usado en las celdas cargadas")
+        btn_detect = QPushButton("🔍 Detectar del Plan (BCCH + TCH)")
+        btn_detect.setToolTip("Detectar rango mínimo y máximo usado en todos los canales (BCCH y TCH)")
+        btn_detect.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;
+                color: #00d4aa;
+                font-weight: bold;
+                border: 1px solid #00d4aa;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover { background-color: #00d4aa; color: #1e272e; }
+        """)
         btn_detect.clicked.connect(self._detect_from_plan)
         rg_layout.addWidget(btn_detect, 1, 6)
+
+        # Status feedback for detection
+        self.lbl_detect_status = QLabel("")
+        self.lbl_detect_status.setStyleSheet("color: #00d4aa; font-size: 11px; padding: 2px;")
+        rg_layout.addWidget(self.lbl_detect_status, 2, 0, 1, 7)
 
         # Target range
         lbl_target = QLabel("<b>Rango Final (Nuevo espectro objetivo):</b>")
         lbl_target.setStyleSheet("color: #00d4aa;")
-        rg_layout.addWidget(lbl_target, 2, 0, 1, 4)
+        rg_layout.addWidget(lbl_target, 3, 0, 1, 4)
 
-        rg_layout.addWidget(QLabel("ARFCN Mín:"), 3, 0)
+        rg_layout.addWidget(QLabel("ARFCN Mín:"), 4, 0)
         self.spin_tgt_start = QSpinBox()
         self.spin_tgt_start.setRange(0, 1023)
-        rg_layout.addWidget(self.spin_tgt_start, 3, 1)
+        rg_layout.addWidget(self.spin_tgt_start, 4, 1)
 
-        rg_layout.addWidget(QLabel("ARFCN Máx:"), 3, 2)
+        rg_layout.addWidget(QLabel("ARFCN Máx:"), 4, 2)
         self.spin_tgt_end = QSpinBox()
         self.spin_tgt_end.setRange(0, 1023)
-        rg_layout.addWidget(self.spin_tgt_end, 3, 3)
+        rg_layout.addWidget(self.spin_tgt_end, 4, 3)
 
-        rg_layout.addWidget(QLabel("Excluidas:"), 3, 4)
+        rg_layout.addWidget(QLabel("Excluidas:"), 4, 4)
         self.txt_tgt_excluded = QLineEdit()
         self.txt_tgt_excluded.setPlaceholderText("Ej: 105, 110")
-        rg_layout.addWidget(self.txt_tgt_excluded, 3, 5)
+        rg_layout.addWidget(self.txt_tgt_excluded, 4, 5)
 
         layout.addWidget(ranges_group)
 
@@ -253,10 +271,15 @@ class RangeAdaptationDialog(QDialog):
 
     def _init_defaults(self):
         """Initialize spinboxes with current rules and plan."""
-        # Initial range from current rules or detected plan
-        det_min, det_max, _ = detect_current_spectrum_range(self.cells)
+        det_min, det_max, _ = detect_current_spectrum_range(self.cells, self.results)
+        self.spin_init_start.blockSignals(True)
+        self.spin_init_end.blockSignals(True)
+
         self.spin_init_start.setValue(det_min if det_min > 0 else self.rules.freq_range_start)
         self.spin_init_end.setValue(det_max if det_max > 0 else self.rules.freq_range_end)
+
+        self.spin_init_start.blockSignals(False)
+        self.spin_init_end.blockSignals(False)
 
         # Target range defaults to rules
         self.spin_tgt_start.setValue(self.rules.freq_range_start)
@@ -268,11 +291,37 @@ class RangeAdaptationDialog(QDialog):
             self.txt_tgt_excluded.setText(excl_str)
 
     def _detect_from_plan(self):
-        """Auto-detect initial range from loaded cells."""
-        det_min, det_max, _ = detect_current_spectrum_range(self.cells)
+        """Auto-detect initial range across ALL channels (BCCH and all TCH frequencies)."""
+        det_min, det_max, details = detect_current_spectrum_range(self.cells, self.results)
+
+        self.spin_init_start.blockSignals(True)
+        self.spin_init_end.blockSignals(True)
+
         self.spin_init_start.setValue(det_min)
         self.spin_init_end.setValue(det_max)
+
+        self.spin_init_start.blockSignals(False)
+        self.spin_init_end.blockSignals(False)
+
         self._update_analysis()
+
+        # Update detailed feedback label
+        b_min = details.get("bcch_min")
+        b_max = details.get("bcch_max")
+        t_min = details.get("tch_min")
+        t_max = details.get("tch_max")
+        n_bcch = details.get("total_bcch_channels", 0)
+        n_tch = details.get("total_tch_channels", 0)
+        n_all = details.get("total_unique_freqs", 0)
+
+        bcch_str = f"{b_min}..{b_max}" if b_min is not None else "—"
+        tch_str = f"{t_min}..{t_max}" if t_min is not None else "—"
+
+        self.lbl_detect_status.setText(
+            f"✅ Rango detectado (BCCH + TCH): ARFCN {det_min} a {det_max} | "
+            f"BCCH ({n_bcch} celdas): {bcch_str} | TCH ({n_tch} canales): {tch_str} | "
+            f"Total frecuencias únicas: {n_all}"
+        )
 
     def _parse_excluded(self, text: str) -> list[int]:
         res = []

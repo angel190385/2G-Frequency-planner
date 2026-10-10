@@ -15,9 +15,11 @@ from src.ui.styles import Colors
 class RulesDialog(QDialog):
     """Dialog for configuring co-channel, adjacent channel, and algorithm rules."""
 
-    def __init__(self, rules: FrequencyRules, parent=None):
+    def __init__(self, rules: FrequencyRules, cells=None, results=None, parent=None):
         super().__init__(parent)
         self.rules = FrequencyRules.from_dict(rules.to_dict())  # work on a copy
+        self.cells = cells or {}
+        self.results = results
         self._setup_ui()
         self._load_from_rules()
 
@@ -217,10 +219,30 @@ class RulesDialog(QDialog):
         self.spin_freq_end.setRange(0, 1023)
         range_layout.addWidget(self.spin_freq_end, 1, 1)
 
-        range_layout.addWidget(QLabel("Frecuencias excluidas (separadas por coma):"), 2, 0, 1, 2)
+        btn_detect = QPushButton("🔍 Detectar Rango del Plan (BCCH + TCH)")
+        btn_detect.setToolTip("Detectar rango mínimo y máximo usado en todas las celdas (BCCH y TCH)")
+        btn_detect.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;
+                color: #00d4aa;
+                font-weight: bold;
+                border: 1px solid #00d4aa;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover { background-color: #00d4aa; color: #1e272e; }
+        """)
+        btn_detect.clicked.connect(self._detect_range_from_plan)
+        range_layout.addWidget(btn_detect, 2, 0, 1, 2)
+
+        self.lbl_detect_range_status = QLabel("")
+        self.lbl_detect_range_status.setStyleSheet("color: #00d4aa; font-size: 11px;")
+        range_layout.addWidget(self.lbl_detect_range_status, 3, 0, 1, 2)
+
+        range_layout.addWidget(QLabel("Frecuencias excluidas (separadas por coma):"), 4, 0, 1, 2)
         self.txt_excluded = QLineEdit()
         self.txt_excluded.setPlaceholderText("Ej: 50, 75, 100")
-        range_layout.addWidget(self.txt_excluded, 3, 0, 1, 2)
+        range_layout.addWidget(self.txt_excluded, 5, 0, 1, 2)
 
         freq_layout.addWidget(range_group)
 
@@ -385,6 +407,43 @@ class RulesDialog(QDialog):
         self.lbl_stat_formula.setText(f"📐 Fórmula: {info['formula']}")
         self.lbl_stat_desc.setText(f"ℹ️ {info['description']}")
         self.lbl_stat_usage.setText(f"💡 {info['usage']}")
+
+    def _detect_range_from_plan(self):
+        """Auto-detect minimum and maximum ARFCN across all BCCH and TCH channels."""
+        if not self.cells:
+            self.lbl_detect_range_status.setText("⚠ No hay celdas cargadas para detectar el rango.")
+            self.lbl_detect_range_status.setStyleSheet("color: #ffa502; font-size: 11px;")
+            return
+
+        from src.engine.spectrum_manager import detect_current_spectrum_range
+        det_min, det_max, details = detect_current_spectrum_range(self.cells, self.results)
+
+        self.spin_freq_start.blockSignals(True)
+        self.spin_freq_end.blockSignals(True)
+
+        self.spin_freq_start.setValue(det_min)
+        self.spin_freq_end.setValue(det_max)
+
+        self.spin_freq_start.blockSignals(False)
+        self.spin_freq_end.blockSignals(False)
+
+        self._update_pool_preview()
+
+        b_min = details.get("bcch_min")
+        b_max = details.get("bcch_max")
+        t_min = details.get("tch_min")
+        t_max = details.get("tch_max")
+        n_bcch = details.get("total_bcch_channels", 0)
+        n_tch = details.get("total_tch_channels", 0)
+
+        bcch_str = f"{b_min}..{b_max}" if b_min is not None else "—"
+        tch_str = f"{t_min}..{t_max}" if t_min is not None else "—"
+
+        self.lbl_detect_range_status.setText(
+            f"✅ Rango detectado: ARFCN {det_min} a {det_max} "
+            f"(BCCH [{n_bcch}]: {bcch_str} | TCH [{n_tch}]: {tch_str})"
+        )
+        self.lbl_detect_range_status.setStyleSheet("color: #00d4aa; font-weight: bold; font-size: 11px;")
 
     def _update_pool_preview(self):
         """Update the frequency pool count preview."""

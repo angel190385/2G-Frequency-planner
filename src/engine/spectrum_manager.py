@@ -57,22 +57,83 @@ class SpectrumShiftAnalysis:
         return len(self.new_freqs) > 0
 
 
-def detect_current_spectrum_range(cells: dict[str, Cell]) -> tuple[int, int, list[int]]:
+def detect_current_spectrum_range(
+    cells: dict[str, Cell],
+    results: Optional[list] = None
+) -> tuple[int, int, dict]:
     """
-    Scan all loaded cells to find the actual minimum and maximum ARFCN currently in use.
-    Returns (min_arfcn, max_arfcn, []).
-    """
-    used = set()
-    for c in cells.values():
-        if c.bcch is not None and c.bcch > 0:
-            used.add(c.bcch)
-        for f in c.tch_list:
-            if f is not None and f > 0:
-                used.add(f)
+    Scan all loaded cells and active results to find the actual minimum and maximum ARFCN
+    currently in use across ALL channels (BCCH and all TCH frequencies).
 
-    if not used:
-        return (100, 124, [])
-    return (min(used), max(used), [])
+    Returns:
+        (min_arfcn, max_arfcn, details_dict)
+    """
+    bcch_used: set[int] = set()
+    tch_used: set[int] = set()
+
+    for c in cells.values():
+        # 1. BCCH
+        if c.bcch is not None:
+            try:
+                b_val = int(c.bcch)
+                if b_val > 0:
+                    bcch_used.add(b_val)
+            except (ValueError, TypeError):
+                pass
+
+        # 2. TCH list
+        for f in c.tch_list:
+            if f is not None:
+                try:
+                    f_val = int(f)
+                    if f_val > 0:
+                        tch_used.add(f_val)
+                except (ValueError, TypeError):
+                    pass
+
+    # 3. Also check any calculated plan results if provided
+    if results:
+        for r in results:
+            for a in getattr(r, "assignments", []):
+                if getattr(a, "bcch", None) is not None:
+                    try:
+                        b_val = int(a.bcch)
+                        if b_val > 0:
+                            bcch_used.add(b_val)
+                    except (ValueError, TypeError):
+                        pass
+                for f in getattr(a, "tch_list", []):
+                    if f is not None:
+                        try:
+                            f_val = int(f)
+                            if f_val > 0:
+                                tch_used.add(f_val)
+                        except (ValueError, TypeError):
+                            pass
+
+    all_used = bcch_used | tch_used
+
+    if not all_used:
+        min_f, max_f = 100, 124
+    else:
+        min_f, max_f = min(all_used), max(all_used)
+
+    details = {
+        "min": min_f,
+        "max": max_f,
+        "bcch_min": min(bcch_used) if bcch_used else None,
+        "bcch_max": max(bcch_used) if bcch_used else None,
+        "tch_min": min(tch_used) if tch_used else None,
+        "tch_max": max(tch_used) if tch_used else None,
+        "total_bcch_channels": len(bcch_used),
+        "total_tch_channels": len(tch_used),
+        "total_unique_freqs": len(all_used),
+        "all_used": sorted(all_used),
+        "bcch_used": sorted(bcch_used),
+        "tch_used": sorted(tch_used),
+    }
+
+    return min_f, max_f, details
 
 
 def analyze_spectrum_shift(

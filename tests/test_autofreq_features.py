@@ -89,6 +89,24 @@ class TestAutofreqFeatures(unittest.TestCase):
         self.assertGreater(stats["count"], 0)
         self.assertGreater(stats["max"], 0)
 
+    def test_spectrum_detection_includes_bcch_and_tch(self):
+        """Verify that detect_current_spectrum_range scans both BCCH and TCH channels."""
+        station = Station(station_id="ST1", name="TestSite", latitude=40.0, longitude=-3.0)
+        dummy_cells = {
+            "C1": Cell(cell_id="C1", station=station, sector="A", bcch=50, tch_list=[52, 54]),
+            "C2": Cell(cell_id="C2", station=station, sector="B", bcch=60, tch_list=[80, 95]),
+        }
+        det_min, det_max, details = detect_current_spectrum_range(dummy_cells)
+        # BCCH max is 60, but TCH max is 95 -> overall max MUST be 95
+        self.assertEqual(det_min, 50)
+        self.assertEqual(det_max, 95)
+        self.assertEqual(details["bcch_min"], 50)
+        self.assertEqual(details["bcch_max"], 60)
+        self.assertEqual(details["tch_min"], 52)
+        self.assertEqual(details["tch_max"], 95)
+        self.assertEqual(details["total_bcch_channels"], 2)
+        self.assertEqual(details["total_tch_channels"], 4)
+
     def test_spectrum_detection_and_shift_analysis(self):
         """Test detection of used spectrum and differential analysis."""
         det_min, det_max, _ = detect_current_spectrum_range(self.cells)

@@ -111,13 +111,18 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
     stations: dict[str, Station] = {}
     warnings: list[str] = []
 
-    # Detect TCH columns
-    if not rows:
-        return cells, stations, ["El archivo está vacío"]
-
+    # Detect TCH / TRX columns
     sample_keys = list(rows[0].keys())
-    tch_columns = [k for k in sample_keys
-                   if k.lower().startswith('tch')]
+    tch_columns = []
+    for k in sample_keys:
+        kl = k.lower().strip()
+        if kl in ('cell_id', 'station_id', 'station_name', 'lat', 'lon', 'sector', 'azimuth', 'azimut', 'bcch'):
+            continue
+        if (kl.startswith('tch') or kl.startswith('trx') or
+            'tch' in kl or 'trx' in kl or
+            (kl.startswith('ch') and kl not in ('channel', 'canal')) or
+            (('freq' in kl or 'frec' in kl) and 'bcch' not in kl)):
+            tch_columns.append(k)
     tch_columns.sort()
 
     for i, row in enumerate(rows, start=2):  # row 2+ (1 is header)
@@ -153,12 +158,21 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
             if not station_id:
                 station_id = cell_id[:cell_id.rfind(sector)] if sector else cell_id
 
-            # Parse TCH frequencies
+            # Parse TCH frequencies (handles single or delimiter-separated multiple values)
             tch_list = []
+            import re
             for tc in tch_columns:
-                f = _parse_int(row.get(tc, ''))
-                if f is not None:
-                    tch_list.append(f)
+                raw_tc = str(row.get(tc, '')).strip()
+                if not raw_tc or raw_tc.lower() in ('', 'none', 'n/a', '-'):
+                    continue
+                # Find all integer numbers in the field
+                for tok in re.findall(r'\b\d+\b', raw_tc):
+                    try:
+                        f_int = int(tok)
+                        if f_int > 0:
+                            tch_list.append(f_int)
+                    except ValueError:
+                        pass
 
             # Create or reuse Station
             if station_id not in stations:
