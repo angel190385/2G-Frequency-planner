@@ -1,13 +1,30 @@
 # Freq Planner 2G
 
-Herramienta para la planificación y optimización de frecuencias GSM 2G desarrollada en Python y PyQt6.
+Herramienta avanzada para la planificación y optimización de frecuencias GSM 2G desarrollada en Python y PyQt6.
 
 ## Características
 
-- Interfaz gráfica intuitiva construida con PyQt6.
-- Análisis y asignación óptima de frecuencias en redes GSM 2G.
-- Gestión de interferencias y matrices de vecindad.
-- Exportación e importación de datos en formato Excel / CSV.
+- **Optimización Global con Algoritmo Genético**: Evaluación global simultánea de la red minimizando cocanalidades y adyacencias tanto en canales de control (BCCH) como de tráfico (TCH / hopping).
+- **Reconfiguración y Adaptación de Espectro (Rango Inicial → Final)**:
+  - Definición y detección de rango inicial y objetivo de frecuencias ARFCN.
+  - Detección automática de frecuencias que desaparecen y su sustitución en todo el plan cargado.
+  - Detección de nuevo espectro disponible para desatascar interferencias y mejorar globalmente la calidad de la red.
+  - Modos de sustitución heurística inmediata y optimización global guiada.
+- **Modelos Estadísticos Configurables de Pesos e Interferencia**:
+  - **Logarítmico**: Compresión sublineal de varianza ($\log_2(1 + \text{HO})$), estándar para redes GSM urbanas/mixtas.
+  - **Lineal Normalizado**: Ponderación directamente proporcional al tráfico de handovers respecto a la media de la red.
+  - **Sigmoide / Curva en S**: Función logística centrada en la mediana, con alta sensibilidad ante umbrales críticos de tráfico.
+  - **Exponencial / Pareto (80/20)**: Prioridad máxima a los principales hotspots y ejes de tráfico de la red.
+  - **Uniforme / Clásico**: Tratamiento topológico equitativo sin ponderación de contadores de traspaso.
+- **Informes Ejecutivos en PDF con Comparativa de 3 Escenarios**:
+  - Exportación de informes completos en PDF.
+  - Tabla comparativa entre el **Plan Actual (Original)** y hasta **3 Escenarios Calculados** (Score, violaciones críticas BCCH-BCCH, violaciones totales, cocanalidades/adyacencias ponderadas por HO y % de mejora).
+  - Explicación metodológica de los modelos estadísticos empleados.
+  - Detalle completo de asignaciones por celda (Antes vs Después) y relaciones críticas residuales.
+- **Gestión Integral de Red y Visualización**:
+  - Matrices de vecindades y contadores de handovers.
+  - Mapa interactivo de frecuencias y sectores.
+  - Importación y exportación en formatos CSV y Excel (`.xlsx`).
 
 ## Requisitos
 
@@ -22,4 +39,7 @@ pip install -r requirements.txt
 
 # Ejecutar la aplicación
 python main.py
+
+# Ejecutar pruebas unitarias
+python -m unittest discover tests
 ```

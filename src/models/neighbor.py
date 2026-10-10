@@ -113,6 +113,38 @@ class NeighborGraph:
     def has_ho_data(self) -> bool:
         return self.relations_with_ho > 0
 
+    def get_ho_statistics(self) -> dict[str, float]:
+        """
+        Compute statistical summary for all valid handover relations:
+        mean, median, max, min, and count.
+        """
+        values = [r.ho_count for r in self._relations.values()
+                  if r.ho_count is not None and r.ho_count >= 0]
+        if not values:
+            return {
+                "count": 0.0,
+                "mean": 1.0,
+                "median": 1.0,
+                "max": 1.0,
+                "min": 0.0
+            }
+
+        sorted_vals = sorted(values)
+        n = len(sorted_vals)
+        mean_val = float(sum(sorted_vals) / n)
+        if n % 2 == 1:
+            median_val = float(sorted_vals[n // 2])
+        else:
+            median_val = float((sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2.0)
+
+        return {
+            "count": float(n),
+            "mean": max(1.0, mean_val),
+            "median": max(1.0, median_val),
+            "max": max(1.0, float(sorted_vals[-1])),
+            "min": float(sorted_vals[0])
+        }
+
     def clear(self):
         self._relations.clear()
         self._by_cell.clear()

@@ -16,16 +16,59 @@ from src.models.frequency_plan import (
 from src.engine.constraints import FrequencyRules
 
 
-def _ho_weight(ho_count: Optional[int]) -> float:
+def _ho_weight(
+    ho_count: Optional[int],
+    model: str = "logarithmic",
+    stats: Optional[dict[str, float]] = None
+) -> float:
     """
-    Weight multiplier based on handover count.
-    Uses log2(1 + ho) so high-HO relations are penalised more
-    but the scale doesn't explode.
-    If HO data is unavailable, returns 1.0 (neutral).
+    Weight multiplier based on handover count and the configured statistical model.
+
+    Statistical Models:
+    1. 'logarithmic': w = log2(1 + ho) if ho > 0 else 0.1
+       Sublinear scaling, mitigates extreme variance and prevents network bottlenecks
+       from overwhelming softer neighbor relations.
+    2. 'linear': w = 1.0 + (ho / mean_ho) * 1.5
+       Directly proportional to handover traffic volume relative to network mean.
+    3. 'sigmoid': w = 0.2 + 3.8 / (1.0 + exp(-k * (ho - median_ho)))
+       S-curve centered at median handover. Soft penalty below threshold, rapid
+       saturation for relations exceeding the critical threshold.
+    4. 'exponential': w = 1.0 + 5.0 * (ho / max_ho) ** 2
+       Quadratic Pareto law (80/20) heavily penalizing top hotspot relations.
+    5. 'uniform': w = 1.0
+       Pure topological assignment without handover weighting.
     """
     if ho_count is None:
         return 1.0
-    return math.log2(1 + ho_count) if ho_count > 0 else 0.1
+    if ho_count <= 0:
+        return 0.1
+
+    if model == "uniform":
+        return 1.0
+
+    mean_ho = stats.get("mean", 10.0) if stats else 10.0
+    median_ho = stats.get("median", 10.0) if stats else 10.0
+    max_ho = stats.get("max", 100.0) if stats else 100.0
+
+    if model == "linear":
+        ratio = ho_count / max(1.0, mean_ho)
+        return max(0.1, 1.0 + ratio * 1.5)
+
+    elif model == "sigmoid":
+        scale = max(5.0, median_ho * 0.5)
+        z = (ho_count - median_ho) / scale
+        z = max(-10.0, min(10.0, z))  # Prevent math overflow
+        sig = 1.0 / (1.0 + math.exp(-z))
+        return max(0.1, 0.2 + 3.8 * sig)
+
+    elif model == "exponential":
+        ratio = ho_count / max(1.0, max_ho)
+        ratio = min(2.0, ratio)
+        return max(0.1, 1.0 + 5.0 * (ratio ** 2))
+
+    else:
+        # Default: logarithmic
+        return math.log2(1 + ho_count)
 
 
 def _distance_penalty(distance_km: float, threshold_km: float) -> float:
@@ -80,6 +123,9 @@ def evaluate_plan(
     violations = [] if collect_violations else None
     total_score = 0.0
 
+    ho_stats = neighbor_graph.get_ho_statistics()
+    ho_model = getattr(rules, "ho_statistical_model", "logarithmic")
+
     # Track which pairs we've already checked
     checked_pairs: set[tuple[str, str]] = set()
 
@@ -103,7 +149,7 @@ def evaluate_plan(
         same_station = (cell_a and cell_b and
                         cell_a.station.station_id == cell_b.station.station_id)
 
-        ho_w = _ho_weight(relation.ho_count)
+        ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
 
         for freq_a, type_a, freq_b, type_b in _get_freq_pairs(a_assign, b_assign):
             diff = abs(freq_a - freq_b)

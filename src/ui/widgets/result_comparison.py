@@ -333,10 +333,25 @@ class ResultComparisonWidget(QWidget):
         self.lbl_status.setObjectName("label_subtitle")
         header_layout.addWidget(self.lbl_status)
 
-        self.btn_export = QPushButton("📥 Exportar Resultados")
-        self.btn_export.setObjectName("btn_primary")
+        self.btn_export = QPushButton("📥 Exportar CSV")
+        self.btn_export.setObjectName("btn_secondary")
         self.btn_export.setEnabled(False)
         header_layout.addWidget(self.btn_export)
+
+        self.btn_export_pdf = QPushButton("📄 Exportar Informe PDF (3 Escenarios)")
+        self.btn_export_pdf.setObjectName("btn_primary")
+        self.btn_export_pdf.setStyleSheet("""
+            QPushButton {
+                background-color: #0984e3;
+                color: white;
+                font-weight: bold;
+                padding: 6px 14px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #74b9ff; }
+        """)
+        self.btn_export_pdf.setEnabled(False)
+        header_layout.addWidget(self.btn_export_pdf)
 
         layout.addLayout(header_layout)
 
@@ -354,9 +369,11 @@ class ResultComparisonWidget(QWidget):
         if not results:
             self.lbl_status.setText("Sin resultados")
             self.btn_export.setEnabled(False)
+            self.btn_export_pdf.setEnabled(False)
             return
 
         self.btn_export.setEnabled(True)
+        self.btn_export_pdf.setEnabled(True)
 
         per_run = getattr(results, "per_run", {})
         num_runs = len(per_run)

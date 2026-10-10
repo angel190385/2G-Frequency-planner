@@ -5,6 +5,51 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# ── Handover Statistical Models ──────────────────────────────────
+STATISTICAL_MODELS: dict[str, dict] = {
+    "logarithmic": {
+        "id": "logarithmic",
+        "name": "Logarítmico (Compresión de Varianza - Estándar)",
+        "short_name": "Logarítmico",
+        "formula": "w = log2(1 + HO) si HO > 0 else 0.1",
+        "description": "Aplica una compresión sublineal a los traspasos. Amortigua valores extremos de tráfico sin ignorarlos, protegiendo tanto rutas críticas como vecindades secundarias sin que las grandes arterias monopolicen la función de coste.",
+        "usage": "Recomendado como estándar para la mayoría de redes GSM urbanas y mixtas.",
+    },
+    "linear": {
+        "id": "linear",
+        "name": "Lineal Normalizado (Proporcional a Carga)",
+        "short_name": "Lineal",
+        "formula": "w = 1.0 + (HO / media_HO) * 1.5",
+        "description": "Escala directamente proporcional al volumen de traspasos relativo a la media de la red. Penaliza en razón directa al tráfico observado sin compresión.",
+        "usage": "Recomendado cuando el tráfico es homogéneo y se desea proteger los handovers en proporción exacta al volumen.",
+    },
+    "sigmoid": {
+        "id": "sigmoid",
+        "name": "Sigmoide / Curva S (Sensibilidad por Umbral Crítico)",
+        "short_name": "Sigmoide",
+        "formula": "w = 0.2 + 3.8 / (1 + e^(-k * (HO - mediana_HO)))",
+        "description": "Función logística centrada en la mediana. Trata los handovers bajos de forma suave y tolerante, pero escala rápidamente al superar la mediana penalizando severamente las relaciones con alto riesgo de caída de llamada.",
+        "usage": "Ideal para redes densas donde relaciones que superan el umbral medio tienen alto riesgo de corte de llamada.",
+    },
+    "exponential": {
+        "id": "exponential",
+        "name": "Exponencial / Pareto 80-20 (Prioridad a Hotspots)",
+        "short_name": "Exponencial",
+        "formula": "w = 1.0 + 5.0 * (HO / max_HO)^2",
+        "description": "Aplica una ley cuadrática que concentra la máxima penalización en el top 10-20% de relaciones más cargadas de la red (principio de Pareto), flexibilizando restricciones en enlaces secundarios.",
+        "usage": "Recomendado en redes con hotspots o ejes de tráfico prioritarios que no admiten degradación.",
+    },
+    "uniform": {
+        "id": "uniform",
+        "name": "Uniforme / Topológico (Sin Ponderación HO)",
+        "short_name": "Uniforme",
+        "formula": "w = 1.0 (neutro)",
+        "description": "Asigna peso constante 1.0 a todas las relaciones de vecindad sin tener en cuenta los contadores de handover.",
+        "usage": "Recomendado cuando no se dispone de datos de HO fiables o para un diseño topológico puro.",
+    },
+}
+
+
 @dataclass
 class FrequencyRules:
     """
@@ -46,6 +91,9 @@ class FrequencyRules:
 
     weight_same_station_cochannel: float = 200.0
     weight_same_station_adjacent: float = 150.0
+
+    # ── Statistical Model for Handover Weights ────────────────────────
+    ho_statistical_model: str = "logarithmic"
 
     # ── Distance penalty ──────────────────────────────────────────────
     enable_distance_penalty: bool = True
@@ -163,6 +211,7 @@ class FrequencyRules:
             "weight_adjacent_tch_tch": self.weight_adjacent_tch_tch,
             "weight_same_station_cochannel": self.weight_same_station_cochannel,
             "weight_same_station_adjacent": self.weight_same_station_adjacent,
+            "ho_statistical_model": self.ho_statistical_model,
             "enable_distance_penalty": self.enable_distance_penalty,
             "distance_threshold_km": self.distance_threshold_km,
             "weight_distance": self.weight_distance,

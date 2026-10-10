@@ -11,14 +11,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QBrush
 
+import os
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborGraph
 from src.models.frequency_plan import PlanResult
-from src.engine.constraints import FrequencyRules
+from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
 from src.engine.optimizer import FrequencyOptimizer
 from src.io.data_loader import (
     load_cells, load_neighbors, load_handovers, export_results
 )
+from src.io.pdf_exporter import export_plan_pdf
 from src.ui.styles import Colors
 from src.ui.widgets.cell_table import CellTableWidget
 from src.ui.widgets.neighbor_table import NeighborTableWidget
@@ -27,6 +29,7 @@ from src.ui.widgets.result_comparison import ResultComparisonWidget
 from src.ui.widgets.map_widget import MapWidget
 from src.ui.dialogs.import_dialog import ImportDialog
 from src.ui.dialogs.rules_dialog import RulesDialog
+from src.ui.dialogs.range_adaptation_dialog import RangeAdaptationDialog
 
 
 class OptimizerThread(QThread):
@@ -114,10 +117,15 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        act_export = QAction("📥 Exportar Resultados...", self)
+        act_export = QAction("📥 Exportar CSV...", self)
         act_export.setShortcut("Ctrl+E")
         act_export.triggered.connect(self._export_results)
         file_menu.addAction(act_export)
+
+        act_export_pdf = QAction("📄 Exportar Informe PDF (3 Escenarios)...", self)
+        act_export_pdf.setShortcut("Ctrl+P")
+        act_export_pdf.triggered.connect(self._export_pdf)
+        file_menu.addAction(act_export_pdf)
 
         file_menu.addSeparator()
 
@@ -127,9 +135,13 @@ class MainWindow(QMainWindow):
         file_menu.addAction(act_exit)
 
         # Rules menu
-        rules_menu = menubar.addMenu("&Reglas")
+        rules_menu = menubar.addMenu("&Reglas y Espectro")
 
-        act_rules = QAction("⚙️ Configurar Reglas...", self)
+        act_spectrum = QAction("📻 Reconfigurar Espectro (Rango Inicial → Final)...", self)
+        act_spectrum.triggered.connect(self._open_spectrum_adaptation_dialog)
+        rules_menu.addAction(act_spectrum)
+
+        act_rules = QAction("⚙️ Configurar Reglas y Pesos Estadísticos...", self)
         act_rules.setShortcut("Ctrl+R")
         act_rules.triggered.connect(self._open_rules_dialog)
         rules_menu.addAction(act_rules)
@@ -177,6 +189,7 @@ class MainWindow(QMainWindow):
         # ── Tab 4: Results ─────────────────────────────────────────
         self.result_widget = ResultComparisonWidget()
         self.result_widget.btn_export.clicked.connect(self._export_results)
+        self.result_widget.btn_export_pdf.clicked.connect(self._export_pdf)
         self.tabs.addTab(self.result_widget, "📈 Resultados")
 
         # ── Tab 5: Interactive Map ────────────────────────────────
@@ -198,7 +211,23 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addStretch()
 
-        btn_rules = QPushButton("⚙️ Reglas")
+        btn_spectrum = QPushButton("📻 Reconfigurar Espectro (Inicial → Final)")
+        btn_spectrum.setToolTip("Definir rango inicial y final, sustituir frecuencias que desaparecen y mejorar con nuevo espectro")
+        btn_spectrum.setStyleSheet("""
+            QPushButton {
+                background-color: #1e2b3e;
+                color: #00d4aa;
+                font-weight: bold;
+                border: 1px solid #00d4aa;
+                border-radius: 4px;
+                padding: 5px 12px;
+            }
+            QPushButton:hover { background-color: #00d4aa; color: #1e272e; }
+        """)
+        btn_spectrum.clicked.connect(self._open_spectrum_adaptation_dialog)
+        header.addWidget(btn_spectrum)
+
+        btn_rules = QPushButton("⚙️ Reglas & Pesos")
         btn_rules.clicked.connect(self._open_rules_dialog)
         header.addWidget(btn_rules)
         layout.addLayout(header)
@@ -390,13 +419,13 @@ class MainWindow(QMainWindow):
         # Update rules summary
         r = self.rules
         pool = len(r.available_frequencies)
+        stat_key = getattr(r, "ho_statistical_model", "logarithmic")
+        stat_name = STATISTICAL_MODELS.get(stat_key, {}).get("short_name", stat_key.capitalize())
         summary = (
-            f"Rango ARFCN: {r.freq_range_start}-{r.freq_range_end} "
-            f"({pool} disponibles)\n"
-            f"Ejecuciones: {r.num_runs} pasadas | "
-            f"Población: {r.population_size}\n"
-            f"Generaciones: {r.num_generations} por pasada | "
-            f"Top-K: {r.top_k_results}"
+            f"Rango ARFCN: {r.freq_range_start}-{r.freq_range_end} ({pool} disponibles)\n"
+            f"Modelo Estadístico: {stat_name}\n"
+            f"Ejecuciones: {r.num_runs} pasadas | Población: {r.population_size}\n"
+            f"Generaciones: {r.num_generations} por pasada | Top-K: {r.top_k_results}"
         )
         self.lbl_rules_summary.setText(summary)
 
@@ -747,6 +776,84 @@ class MainWindow(QMainWindow):
                     self, "Error",
                     f"Error exportando:\n{str(e)}"
                 )
+
+    def _open_spectrum_adaptation_dialog(self):
+        """Open the spectrum range transition and adaptation dialog."""
+        if not self.cells:
+            QMessageBox.warning(
+                self, "Sin celdas cargadas",
+                "Debes importar los datos de celdas antes de reconfigurar el espectro."
+            )
+            return
+
+        dialog = RangeAdaptationDialog(
+            cells=self.cells,
+            neighbor_graph=self.neighbor_graph,
+            rules=self.rules,
+            parent=self
+        )
+
+        should_optimize = False
+        def on_optimize_requested(mode):
+            nonlocal should_optimize
+            should_optimize = True
+
+        dialog.optimize_requested.connect(on_optimize_requested)
+
+        if dialog.exec() == RangeAdaptationDialog.DialogCode.Accepted:
+            self._update_status()
+            self._refresh_calc_table()
+            self.tabs.setCurrentIndex(2)  # Switch to Calculation tab
+            self.status_label.setText(
+                f"Espectro reconfigurado a {self.rules.freq_range_start}-{self.rules.freq_range_end}"
+            )
+            if should_optimize:
+                self._run_calculation()
+
+    def _export_pdf(self):
+        """Export comprehensive statistical comparison report to PDF (comparing with 3 scenarios)."""
+        if not self.results:
+            QMessageBox.warning(
+                self, "Sin resultados",
+                "Debes ejecutar el cálculo de frecuencias antes de generar el informe PDF."
+            )
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Informe PDF de Planificación",
+            "informe_plan_frecuencias_3_escenarios.pdf",
+            "Documentos PDF (*.pdf);;Todos (*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            export_plan_pdf(
+                file_path=file_path,
+                cells=self.cells,
+                neighbor_graph=self.neighbor_graph,
+                rules=self.rules,
+                results=self.results
+            )
+
+            res = QMessageBox.information(
+                self, "Informe PDF Generado",
+                f"✅ Informe PDF generado correctamente con la comparativa de 3 escenarios:\n\n{file_path}\n\n"
+                f"¿Deseas abrir el archivo ahora?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if res == QMessageBox.StandardButton.Yes:
+                try:
+                    os.startfile(file_path)
+                except Exception as open_err:
+                    QMessageBox.warning(self, "Aviso", f"No se pudo abrir automáticamente el archivo: {open_err}")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error al generar PDF",
+                f"Se produjo un error al generar el informe PDF:\n\n{str(e)}"
+            )
 
     def _show_about(self):
         """Show about dialog."""

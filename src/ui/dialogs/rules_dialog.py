@@ -4,11 +4,11 @@ Rules configuration dialog for co-channel and adjacent channel settings.
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QCheckBox, QSpinBox, QDoubleSpinBox, QTabWidget,
-    QWidget, QGridLayout, QFrame, QLineEdit
+    QWidget, QGridLayout, QFrame, QLineEdit, QComboBox
 )
 from PyQt6.QtCore import Qt
 
-from src.engine.constraints import FrequencyRules
+from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
 from src.ui.styles import Colors
 
 
@@ -105,11 +105,51 @@ class RulesDialog(QDialog):
 
         tabs.addTab(rules_tab, "🔒 Reglas")
 
-        # ── Tab 2: Weights ─────────────────────────────────────────
+        # ── Tab 2: Weights & Statistical Models ────────────────────
         weights_tab = QWidget()
         weights_layout = QVBoxLayout(weights_tab)
 
-        weights_group = QGroupBox("Pesos de la función de coste")
+        # Statistical Model Group
+        stat_group = QGroupBox("📊 Modelo de Cálculo Estadístico de Handovers (Tráfico)")
+        stat_layout = QVBoxLayout(stat_group)
+
+        stat_header = QHBoxLayout()
+        stat_header.addWidget(QLabel("<b>Modelo de ponderación estadística:</b>"))
+        self.combo_stat_model = QComboBox()
+        for key, m_info in STATISTICAL_MODELS.items():
+            self.combo_stat_model.addItem(m_info["name"], key)
+        self.combo_stat_model.currentIndexChanged.connect(self._on_stat_model_changed)
+        stat_header.addWidget(self.combo_stat_model, 1)
+        stat_layout.addLayout(stat_header)
+
+        # Informative card explaining formula and rationale
+        self.card_stat_info = QFrame()
+        self.card_stat_info.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a2e;
+                border: 1px solid #2a2a4e;
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        card_layout = QVBoxLayout(self.card_stat_info)
+        self.lbl_stat_formula = QLabel()
+        self.lbl_stat_formula.setStyleSheet("color: #00d4aa; font-weight: bold; font-size: 13px;")
+        self.lbl_stat_desc = QLabel()
+        self.lbl_stat_desc.setWordWrap(True)
+        self.lbl_stat_desc.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+        self.lbl_stat_usage = QLabel()
+        self.lbl_stat_usage.setWordWrap(True)
+        self.lbl_stat_usage.setStyleSheet("color: #ffa502; font-size: 11px;")
+
+        card_layout.addWidget(self.lbl_stat_formula)
+        card_layout.addWidget(self.lbl_stat_desc)
+        card_layout.addWidget(self.lbl_stat_usage)
+        stat_layout.addWidget(self.card_stat_info)
+
+        weights_layout.addWidget(stat_group)
+
+        weights_group = QGroupBox("Pesos base de la función de coste")
         wg_layout = QGridLayout(weights_group)
 
         weight_labels = [
@@ -158,7 +198,7 @@ class RulesDialog(QDialog):
         weights_layout.addWidget(dist_group)
         weights_layout.addStretch()
 
-        tabs.addTab(weights_tab, "⚖️ Pesos")
+        tabs.addTab(weights_tab, "⚖️ Pesos & Estadísticas")
 
         # ── Tab 3: Frequency Range ─────────────────────────────────
         freq_tab = QWidget()
@@ -304,6 +344,13 @@ class RulesDialog(QDialog):
         self.spin_sep_station.setValue(r.min_separation_same_station)
         self.spin_sep_bcch.setValue(r.min_separation_bcch_neighbors)
 
+        # Statistical model
+        curr_model = getattr(r, "ho_statistical_model", "logarithmic")
+        idx = self.combo_stat_model.findData(curr_model)
+        if idx >= 0:
+            self.combo_stat_model.setCurrentIndex(idx)
+        self._on_stat_model_changed()
+
         # Weights
         for attr, spin in self.weight_spins.items():
             spin.setValue(getattr(r, attr))
@@ -330,6 +377,14 @@ class RulesDialog(QDialog):
         self.spin_num_runs.setValue(r.num_runs)
 
         self._update_pool_preview()
+
+    def _on_stat_model_changed(self):
+        """Update informative labels when the statistical model changes."""
+        key = self.combo_stat_model.currentData() or "logarithmic"
+        info = STATISTICAL_MODELS.get(key, STATISTICAL_MODELS["logarithmic"])
+        self.lbl_stat_formula.setText(f"📐 Fórmula: {info['formula']}")
+        self.lbl_stat_desc.setText(f"ℹ️ {info['description']}")
+        self.lbl_stat_usage.setText(f"💡 {info['usage']}")
 
     def _update_pool_preview(self):
         """Update the frequency pool count preview."""
@@ -377,6 +432,9 @@ class RulesDialog(QDialog):
         r.min_separation_same_cell = self.spin_sep_cell.value()
         r.min_separation_same_station = self.spin_sep_station.value()
         r.min_separation_bcch_neighbors = self.spin_sep_bcch.value()
+
+        # Statistical model
+        r.ho_statistical_model = self.combo_stat_model.currentData() or "logarithmic"
 
         # Weights
         for attr, spin in self.weight_spins.items():
