@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
         """Refresh the calculation cell selection table using native lightweight items."""
         self.calc_table.blockSignals(True)
         self.calc_table.setRowCount(len(self.cells))
-        self.calc_table.setUniformRowHeights(True)
+        self.calc_table.verticalHeader().setDefaultSectionSize(26)
 
         for row, cell in enumerate(sorted(self.cells.values(),
                                            key=lambda c: (c.station.station_id, c.sector))):

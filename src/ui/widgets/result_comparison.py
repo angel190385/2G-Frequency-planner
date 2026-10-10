@@ -66,7 +66,7 @@ class SingleRunResultWidget(QWidget):
 
         self.assign_table = QTableWidget()
         self.assign_table.setAlternatingRowColors(True)
-        self.assign_table.setUniformRowHeights(True)
+        self.assign_table.verticalHeader().setDefaultSectionSize(26)
         self.assign_table.horizontalHeader().setStretchLastSection(True)
         self.assign_table.verticalHeader().setVisible(False)
         assign_layout.addWidget(self.assign_table)

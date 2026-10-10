@@ -39,7 +39,7 @@ class HOTableWidget(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
-        self.table.setUniformRowHeights(True)
+        self.table.verticalHeader().setDefaultSectionSize(26)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)

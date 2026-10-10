@@ -41,7 +41,7 @@ class CellTableWidget(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
-        self.table.setUniformRowHeights(True)
+        self.table.verticalHeader().setDefaultSectionSize(26)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.horizontalHeader().setStretchLastSection(True)
