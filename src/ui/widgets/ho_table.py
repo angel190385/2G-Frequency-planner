@@ -39,6 +39,7 @@ class HOTableWidget(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
+        self.table.setUniformRowHeights(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
@@ -115,9 +116,10 @@ class HOTableWidget(QWidget):
 
                 self.table.setItem(row, col, item)
 
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for i in range(len(columns)):
+            self.table.setColumnWidth(i, 100)
 
         # Update stats
         if ho_relations:

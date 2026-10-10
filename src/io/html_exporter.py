@@ -303,7 +303,7 @@ def _build_payload(
 
 
 def _build_html_template(payload: dict) -> str:
-    payload_json = json.dumps(payload, ensure_ascii=False)
+    payload_json = json.dumps(payload, ensure_ascii=False).replace("</script>", "<\\/script>")
 
     return f"""<!DOCTYPE html>
 <html lang="es" data-theme="dark">
@@ -1161,6 +1161,24 @@ def _build_html_template(payload: dict) -> str:
 
     let activeScenarioIndex = 0; // 0: Scenario 1, 1: Scenario 2, etc. (or -1 for baseline)
 
+    function escapeHtml(str) {{
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }}
+
+    function sanitizeCsv(val) {{
+        let s = String(val ?? '');
+        if (/^[=\\+\\-@\\t\\r]/.test(s)) {{
+            s = "'" + s;
+        }}
+        return s;
+    }}
+
     function init() {{
         document.getElementById('meta-date').innerText = data.metadata.generated_at;
         document.getElementById('label-cells-summary').innerText = 
@@ -1337,7 +1355,10 @@ def _build_html_template(payload: dict) -> str:
             return;
         }}
 
-        tbody.innerHTML = filtered.map(c => {{
+        const maxToRender = 1000;
+        const toDisplay = filtered.slice(0, maxToRender);
+
+        let rowsHtml = toDisplay.map(c => {{
             const bcchBefore = c.bcch_before !== null ? c.bcch_before : '—';
             const bcchAfter = c.bcch_after !== null ? c.bcch_after : '—';
             const bcchStyle = c.bcch_changed ? 'color: var(--danger); font-weight: bold;' : '';
@@ -1352,9 +1373,9 @@ def _build_html_template(payload: dict) -> str:
 
             return `
                 <tr>
-                    <td style="font-weight: 700;">${{c.cell_id}}</td>
-                    <td>${{c.station}}</td>
-                    <td><span class="badge-pill" style="background: var(--bg-card);">${{c.sector}}</span></td>
+                    <td style="font-weight: 700;">${{escapeHtml(c.cell_id)}}</td>
+                    <td>${{escapeHtml(c.station)}}</td>
+                    <td><span class="badge-pill" style="background: var(--bg-card);">${{escapeHtml(c.sector)}}</span></td>
                     <td class="font-mono">${{bcchBefore}}</td>
                     <td class="font-mono" style="${{bcchStyle}}">${{bcchAfter}}</td>
                     <td class="font-mono" style="font-size: 12px;">${{tchBefore}}</td>
@@ -1363,6 +1384,18 @@ def _build_html_template(payload: dict) -> str:
                 </tr>
             `;
         }}).join('');
+
+        if (filtered.length > maxToRender) {{
+            rowsHtml += `
+                <tr style="background: var(--bg-card);">
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 10px; font-style: italic;">
+                        ⚡ Mostrando las primeras ${{maxToRender}} de ${{filtered.length}} celdas cargadas. Usa el buscador superior para filtrar de forma instantánea.
+                    </td>
+                </tr>
+            `;
+        }}
+
+        tbody.innerHTML = rowsHtml;
     }}
 
     function renderViolationsTable() {{
@@ -1383,25 +1416,40 @@ def _build_html_template(payload: dict) -> str:
             return;
         }}
 
-        tbody.innerHTML = filtered.map(v => {{
+        const maxToRender = 1000;
+        const toDisplay = filtered.slice(0, maxToRender);
+
+        let violRowsHtml = toDisplay.map(v => {{
             let badgeClass = 'badge-info';
             if (v.severity === 'critical') badgeClass = 'badge-danger';
             else if (v.severity === 'high') badgeClass = 'badge-warning';
 
             return `
                 <tr>
-                    <td><span class="badge-pill ${{badgeClass}}">${{v.type}} (${{v.channel_types}})</span></td>
-                    <td style="font-weight: 700;">${{v.cell_a}}</td>
-                    <td style="font-weight: 700;">${{v.cell_b}}</td>
+                    <td><span class="badge-pill ${{badgeClass}}">${{escapeHtml(v.type)}} (${{escapeHtml(v.channel_types)}})</span></td>
+                    <td style="font-weight: 700;">${{escapeHtml(v.cell_a)}}</td>
+                    <td style="font-weight: 700;">${{escapeHtml(v.cell_b)}}</td>
                     <td class="font-mono">${{v.freq_a}}</td>
                     <td class="font-mono">${{v.freq_b}}</td>
                     <td class="font-mono">${{v.ho || '—'}}</td>
                     <td class="font-mono">${{v.dist}} km</td>
                     <td class="font-mono" style="font-weight: bold; color: var(--danger);">${{v.cost}}</td>
-                    <td><span class="badge-pill ${{badgeClass}}">${{v.severity.toUpperCase()}}</span></td>
+                    <td><span class="badge-pill ${{badgeClass}}">${{escapeHtml(v.severity.toUpperCase())}}</span></td>
                 </tr>
             `;
         }}).join('');
+
+        if (filtered.length > maxToRender) {{
+            violRowsHtml += `
+                <tr style="background: var(--bg-card);">
+                    <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 10px; font-style: italic;">
+                        ⚡ Mostrando las primeras ${{maxToRender}} de ${{filtered.length}} violaciones. Usa el filtro superior para buscar celdas concretas.
+                    </td>
+                </tr>
+            `;
+        }}
+
+        tbody.innerHTML = violRowsHtml;
     }}
 
     function toggleTheme() {{
@@ -1416,7 +1464,10 @@ def _build_html_template(payload: dict) -> str:
         let csv = "Cell_ID;Station;Sector;BCCH_Antes;BCCH_Despues;TCH_Antes;TCH_Despues;Modificado\\n";
 
         plan.cells.forEach(c => {{
-            csv += `${{c.cell_id}};${{c.station}};${{c.sector}};${{c.bcch_before || ''}};${{c.bcch_after || ''}};${{c.tch_before.join(',')}};${{c.tch_after.join(',')}};${{c.is_changed ? 'SI' : 'NO'}}\\n`;
+            const safeCell = sanitizeCsv(c.cell_id);
+            const safeStation = sanitizeCsv(c.station);
+            const safeSector = sanitizeCsv(c.sector);
+            csv += `${{safeCell}};${{safeStation}};${{safeSector}};${{c.bcch_before || ''}};${{c.bcch_after || ''}};${{c.tch_before.join(',')}};${{c.tch_after.join(',')}};${{c.is_changed ? 'SI' : 'NO'}}\\n`;
         }});
 
         const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
@@ -1479,9 +1530,9 @@ def _build_html_template(payload: dict) -> str:
         }} else {{
             const cellsHtml = stat.cells.map(c => `
                 <div style="background: var(--bg-surface); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 8px;">
-                    <span style="font-weight: 700; color: var(--text-main);">${{c.cell_id}}</span>
-                    <span style="color: var(--text-muted); font-size: 11px;">(${{c.station || 'Estación'}} - Sec ${{c.sector}})</span>
-                    <span class="badge-pill ${{c.role === 'BCCH' ? 'badge-info' : 'badge-warning'}}">${{c.role}}</span>
+                    <span style="font-weight: 700; color: var(--text-main);">${{escapeHtml(c.cell_id)}}</span>
+                    <span style="color: var(--text-muted); font-size: 11px;">(${{escapeHtml(c.station || 'Estación')}} - Sec ${{escapeHtml(c.sector)}})</span>
+                    <span class="badge-pill ${{c.role === 'BCCH' ? 'badge-info' : 'badge-warning'}}">${{escapeHtml(c.role)}}</span>
                 </div>
             `).join(' ');
 
@@ -1814,7 +1865,7 @@ def _build_html_template(payload: dict) -> str:
 
         tbody.innerHTML = channels.map(ch => {{
             const s = plan.channel_stats[String(ch)] || {{ bcch_count: 0, tch_count: 0, total_count: 0, cochannel_conflicts: 0, adjacent_conflicts: 0, conflict_cost: 0, cells: [] }};
-            const cellsList = s.cells.map(c => `${{c.cell_id}} (${{c.role}})`).join(', ') || '—';
+            const cellsList = s.cells.map(c => `${{escapeHtml(c.cell_id)}} (${{escapeHtml(c.role)}})`).join(', ') || '—';
 
             return `
                 <tr>

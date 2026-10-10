@@ -14,7 +14,7 @@ from src.models.cell import Cell
 from src.models.neighbor import NeighborGraph
 from src.models.frequency_plan import FrequencyAssignment, PlanResult, OptimizationResultList
 from src.engine.constraints import FrequencyRules
-from src.engine.cost_function import evaluate_plan, quick_score, _get_freq_pairs
+from src.engine.cost_function import evaluate_plan, quick_score, _get_freq_pairs, precompute_close_cell_pairs
 
 
 @dataclass
@@ -60,9 +60,26 @@ class FrequencyOptimizer:
         if len(self.freq_pool) == 0:
             raise ValueError("No available frequencies in the configured range")
 
-        # Pre-build fixed assignments (frequencies that are NOT changing)
-        self.fixed_assignments: dict[str, FrequencyAssignment] = {}
-        self._build_fixed_assignments()
+        # Precompute close cell pairs for distance penalty to avoid O(N^2) haversine calculation
+        if self.rules.enable_distance_penalty:
+            self.close_cell_pairs = precompute_close_cell_pairs(
+                self.cells, self.neighbor_graph, self.rules.distance_threshold_km
+            )
+        else:
+            self.close_cell_pairs = []
+
+        # Track which cells are being optimized
+        self.optimized_cell_ids = {var.cell_id for var in self.variables}
+
+        # Pre-build fixed assignments for all cells that are NOT changing
+        self.fixed_cell_assignments: dict[str, FrequencyAssignment] = {}
+        for cid, cell in self.cells.items():
+            if cid not in self.optimized_cell_ids:
+                self.fixed_cell_assignments[cid] = FrequencyAssignment(
+                    cell_id=cid,
+                    bcch=cell.bcch if cell.bcch is not None else 0,
+                    tch_list=list(cell.tch_list)
+                )
 
     def cancel(self):
         """Cancel the optimization (called from another thread)."""
@@ -98,7 +115,7 @@ class FrequencyOptimizer:
 
     def _build_fixed_assignments(self):
         """Build assignments for all cells with their fixed frequencies."""
-        # No longer used for decoding, kept for compatibility
+        # Kept for backward compatibility
         pass
 
     def _chromosome_to_assignments(
@@ -120,9 +137,10 @@ class FrequencyOptimizer:
             key = (var.slot_type, var.slot_index)
             cell_vars[var.cell_id][key] = freq
 
-        # Step 2: Build full assignments for every cell
-        assignments: dict[str, FrequencyAssignment] = {}
-        for cid, cell in self.cells.items():
+        # Step 2: Build full assignments starting from precomputed fixed assignments
+        assignments: dict[str, FrequencyAssignment] = dict(self.fixed_cell_assignments)
+        for cid in self.optimized_cell_ids:
+            cell = self.cells[cid]
             vars_for_cell = cell_vars.get(cid, {})
 
             # BCCH: use optimized value if available, else keep original
@@ -135,14 +153,12 @@ class FrequencyOptimizer:
             tch_list = []
             for idx in range(len(cell.tch_list)):
                 if idx in cell.tch_indices_to_recalculate:
-                    # Use optimized value
                     key = ("TCH", idx)
                     if key in vars_for_cell:
                         tch_list.append(vars_for_cell[key])
                     else:
                         tch_list.append(cell.tch_list[idx])
                 else:
-                    # Keep original fixed value
                     tch_list.append(cell.tch_list[idx])
 
             # Append new TCH slots
@@ -370,7 +386,8 @@ class FrequencyOptimizer:
         if n_vars == 0:
             assignments = self._chromosome_to_assignments(np.array([], dtype=np.int32))
             result = evaluate_plan(
-                assignments, self.cells, self.neighbor_graph, self.rules, plan_id=1, run_id=1
+                assignments, self.cells, self.neighbor_graph, self.rules, plan_id=1, run_id=1,
+                precomputed_close_pairs=self.close_cell_pairs
             )
             return OptimizationResultList([result], per_run={1: [result]})
 
@@ -414,7 +431,8 @@ class FrequencyOptimizer:
                 for i, chrom in enumerate(population):
                     assignments = self._chromosome_to_assignments(chrom)
                     scores[i] = quick_score(
-                        assignments, self.cells, self.neighbor_graph, self.rules
+                        assignments, self.cells, self.neighbor_graph, self.rules,
+                        precomputed_close_pairs=self.close_cell_pairs
                     )
 
                 sorted_indices = np.argsort(scores)
@@ -484,7 +502,8 @@ class FrequencyOptimizer:
                 assignments = self._chromosome_to_assignments(chrom)
                 res = evaluate_plan(
                     assignments, self.cells, self.neighbor_graph, self.rules,
-                    plan_id=len(run_results) + 1, run_id=run_idx, collect_violations=True
+                    plan_id=len(run_results) + 1, run_id=run_idx, collect_violations=True,
+                    precomputed_close_pairs=self.close_cell_pairs
                 )
                 run_results.append(res)
                 all_candidates.append((score, chrom.copy(), run_idx))
@@ -493,7 +512,8 @@ class FrequencyOptimizer:
                 assignments = self._chromosome_to_assignments(population[0])
                 res = evaluate_plan(
                     assignments, self.cells, self.neighbor_graph, self.rules,
-                    plan_id=1, run_id=run_idx, collect_violations=True
+                    plan_id=1, run_id=run_idx, collect_violations=True,
+                    precomputed_close_pairs=self.close_cell_pairs
                 )
                 run_results.append(res)
                 all_candidates.append((res.score, population[0].copy(), run_idx))
@@ -516,7 +536,8 @@ class FrequencyOptimizer:
             assignments = self._chromosome_to_assignments(chrom)
             res = evaluate_plan(
                 assignments, self.cells, self.neighbor_graph, self.rules,
-                plan_id=len(global_results) + 1, run_id=r_id, collect_violations=True
+                plan_id=len(global_results) + 1, run_id=r_id, collect_violations=True,
+                precomputed_close_pairs=self.close_cell_pairs
             )
             global_results.append(res)
 

@@ -6,6 +6,7 @@ baseline plan against up to 3 calculated scenarios, including statistical weight
 methodology, metric tables, cell-by-cell assignment changes, and residual violations.
 """
 from __future__ import annotations
+import html as html_lib
 import os
 import sys
 from datetime import datetime
@@ -239,11 +240,15 @@ def _build_report_html(
         bcch_after_style = "color:#d63031; font-weight:bold;" if bcch_changed else ""
         tch_after_style = "color:#0984e3; font-weight:bold;" if tch_changed else ""
 
+        safe_cell_id = html_lib.escape(str(c.cell_id))
+        safe_station_name = html_lib.escape(str(c.station.name))
+        safe_sector = html_lib.escape(str(c.sector))
+
         cell_rows.append(f"""
             <tr>
-                <td style='padding:4px; font-weight:bold;'>{c.cell_id}</td>
-                <td style='padding:4px;'>{c.station.name}</td>
-                <td style='padding:4px; text-align:center;'>{c.sector}</td>
+                <td style='padding:4px; font-weight:bold;'>{safe_cell_id}</td>
+                <td style='padding:4px;'>{safe_station_name}</td>
+                <td style='padding:4px; text-align:center;'>{safe_sector}</td>
                 <td style='padding:4px; text-align:center;'>{bcch_before}</td>
                 <td style='padding:4px; text-align:center; {bcch_after_style}'>{bcch_after}</td>
                 <td style='padding:4px;'>{tch_before}</td>
@@ -260,11 +265,13 @@ def _build_report_html(
             kind = "Cocanal" if v.violation_type == "cochannel" else "Adyacente"
             ho_str = str(v.ho_count) if v.ho_count is not None else "—"
             dist_str = f"{v.distance_km:.2f} km" if v.distance_km > 0 else "0.0 km"
+            safe_cell_a = html_lib.escape(str(v.cell_a_id))
+            safe_cell_b = html_lib.escape(str(v.cell_b_id))
             viol_rows.append(f"""
                 <tr>
                     <td style='padding:4px;'>{kind} ({both})</td>
-                    <td style='padding:4px; font-weight:bold;'>{v.cell_a_id}</td>
-                    <td style='padding:4px; font-weight:bold;'>{v.cell_b_id}</td>
+                    <td style='padding:4px; font-weight:bold;'>{safe_cell_a}</td>
+                    <td style='padding:4px; font-weight:bold;'>{safe_cell_b}</td>
                     <td style='padding:4px; text-align:center;'>{v.freq_a}</td>
                     <td style='padding:4px; text-align:center;'>{v.freq_b}</td>
                     <td style='padding:4px; text-align:center;'>{ho_str}</td>

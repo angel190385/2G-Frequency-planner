@@ -39,6 +39,7 @@ class NeighborTableWidget(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
+        self.table.setUniformRowHeights(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
@@ -114,9 +115,10 @@ class NeighborTableWidget(QWidget):
 
             total_dist += rel.distance_km
 
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for i in range(len(columns)):
+            self.table.setColumnWidth(i, 110)
 
         # Update stats
         total = len(relations)

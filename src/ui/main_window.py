@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
                     "TCH a recalcular", "Nuevos TCH"]
         self.calc_table.setColumnCount(len(columns))
         self.calc_table.setHorizontalHeaderLabels(columns)
+        self.calc_table.itemChanged.connect(self._on_calc_table_item_changed)
         left_layout.addWidget(self.calc_table)
 
         # Quick actions
@@ -433,22 +434,25 @@ class MainWindow(QMainWindow):
         if has_cells:
             self._refresh_calc_table()
 
+    def _on_calc_table_item_changed(self, item):
+        if self.calc_table.signalsBlocked():
+            return
+        if item.column() in (0, 5, 7, 8):
+            self._on_calc_selection_changed()
+
     def _refresh_calc_table(self):
-        """Refresh the calculation cell selection table."""
+        """Refresh the calculation cell selection table using native lightweight items."""
+        self.calc_table.blockSignals(True)
         self.calc_table.setRowCount(len(self.cells))
+        self.calc_table.setUniformRowHeights(True)
 
         for row, cell in enumerate(sorted(self.cells.values(),
                                            key=lambda c: (c.station.station_id, c.sector))):
-            # Recalc checkbox
-            chk = QCheckBox()
-            chk.setChecked(cell.needs_calculation)
-            chk.stateChanged.connect(self._on_calc_selection_changed)
-            chk_widget = QWidget()
-            chk_layout = QHBoxLayout(chk_widget)
-            chk_layout.addWidget(chk)
-            chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            chk_layout.setContentsMargins(0, 0, 0, 0)
-            self.calc_table.setCellWidget(row, 0, chk_widget)
+            # Recalc checkbox (native QTableWidgetItem checkstate)
+            item_recalc = QTableWidgetItem()
+            item_recalc.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            item_recalc.setCheckState(Qt.CheckState.Checked if cell.needs_calculation else Qt.CheckState.Unchecked)
+            self.calc_table.setItem(row, 0, item_recalc)
 
             # Cell info
             items = [
@@ -462,15 +466,11 @@ class MainWindow(QMainWindow):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.calc_table.setItem(row, col + 1, item)
 
-            # Recalc BCCH checkbox
-            chk_bcch = QCheckBox()
-            chk_bcch.setChecked(cell.recalculate_bcch)
-            chk_bcch_widget = QWidget()
-            chk_bcch_layout = QHBoxLayout(chk_bcch_widget)
-            chk_bcch_layout.addWidget(chk_bcch)
-            chk_bcch_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            chk_bcch_layout.setContentsMargins(0, 0, 0, 0)
-            self.calc_table.setCellWidget(row, 5, chk_bcch_widget)
+            # Recalc BCCH checkbox (native QTableWidgetItem checkstate)
+            item_bcch = QTableWidgetItem()
+            item_bcch.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            item_bcch.setCheckState(Qt.CheckState.Checked if cell.recalculate_bcch else Qt.CheckState.Unchecked)
+            self.calc_table.setItem(row, 5, item_bcch)
 
             # TCH info
             tch_str = ",".join(str(f) for f in cell.tch_list) if cell.tch_list else "—"
@@ -488,15 +488,25 @@ class MainWindow(QMainWindow):
             )
             self.calc_table.setItem(row, 7, tch_recalc_item)
 
-            # New TCH count
-            spin_new = QSpinBox()
-            spin_new.setRange(0, 20)
-            spin_new.setValue(cell.new_tch_count)
-            self.calc_table.setCellWidget(row, 8, spin_new)
+            # New TCH count (editable integer item)
+            item_new = QTableWidgetItem(str(cell.new_tch_count))
+            item_new.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
+            item_new.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.calc_table.setItem(row, 8, item_new)
 
-        self.calc_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        header = self.calc_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.calc_table.setColumnWidth(0, 60)
+        self.calc_table.setColumnWidth(1, 100)
+        self.calc_table.setColumnWidth(2, 90)
+        self.calc_table.setColumnWidth(3, 60)
+        self.calc_table.setColumnWidth(4, 70)
+        self.calc_table.setColumnWidth(5, 90)
+        self.calc_table.setColumnWidth(6, 110)
+        self.calc_table.setColumnWidth(7, 120)
+        self.calc_table.setColumnWidth(8, 80)
+
+        self.calc_table.blockSignals(False)
         self._on_calc_selection_changed()
 
     def _on_calc_selection_changed(self):
@@ -505,49 +515,50 @@ class MainWindow(QMainWindow):
         total_vars = 0
 
         for row in range(self.calc_table.rowCount()):
-            chk_widget = self.calc_table.cellWidget(row, 0)
-            if chk_widget:
-                chk = chk_widget.findChild(QCheckBox)
-                if chk and chk.isChecked():
-                    selected += 1
+            recalc_item = self.calc_table.item(row, 0)
+            if recalc_item and recalc_item.checkState() == Qt.CheckState.Checked:
+                selected += 1
 
-                    # Count BCCH
-                    bcch_widget = self.calc_table.cellWidget(row, 5)
-                    if bcch_widget:
-                        bcch_chk = bcch_widget.findChild(QCheckBox)
-                        if bcch_chk and bcch_chk.isChecked():
-                            total_vars += 1
+                # Count BCCH
+                bcch_item = self.calc_table.item(row, 5)
+                if bcch_item and bcch_item.checkState() == Qt.CheckState.Checked:
+                    total_vars += 1
 
-                    # Count TCH recalcs
-                    tch_item = self.calc_table.item(row, 7)
-                    if tch_item and tch_item.text().strip():
-                        indices = [p.strip() for p in tch_item.text().split(',')
-                                   if p.strip()]
-                        total_vars += len(indices)
+                # Count TCH recalcs
+                tch_item = self.calc_table.item(row, 7)
+                if tch_item and tch_item.text().strip():
+                    indices = [p.strip() for p in tch_item.text().split(',')
+                               if p.strip()]
+                    total_vars += len(indices)
 
-                    # Count new TCH
-                    spin = self.calc_table.cellWidget(row, 8)
-                    if spin:
-                        total_vars += spin.value()
+                # Count new TCH
+                new_item = self.calc_table.item(row, 8)
+                if new_item and new_item.text().strip():
+                    try:
+                        total_vars += max(0, min(20, int(new_item.text().strip())))
+                    except ValueError:
+                        pass
 
         self.lbl_calc_cells.setText(f"{selected} celdas seleccionadas")
         self.lbl_calc_vars.setText(f"{total_vars} variables a optimizar")
 
     def _select_all_cells(self):
+        self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
-            chk_widget = self.calc_table.cellWidget(row, 0)
-            if chk_widget:
-                chk = chk_widget.findChild(QCheckBox)
-                if chk:
-                    chk.setChecked(True)
+            item = self.calc_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Checked)
+        self.calc_table.blockSignals(False)
+        self._on_calc_selection_changed()
 
     def _deselect_all_cells(self):
+        self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
-            chk_widget = self.calc_table.cellWidget(row, 0)
-            if chk_widget:
-                chk = chk_widget.findChild(QCheckBox)
-                if chk:
-                    chk.setChecked(False)
+            item = self.calc_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Unchecked)
+        self.calc_table.blockSignals(False)
+        self._on_calc_selection_changed()
 
     def _import_data(self, import_type: str):
         """Handle data import."""
@@ -628,24 +639,16 @@ class MainWindow(QMainWindow):
                               key=lambda c: (c.station.station_id, c.sector))
 
         for row, cell in enumerate(sorted_cells):
-            # Check if row is selected for recalculation
-            chk_widget = self.calc_table.cellWidget(row, 0)
-            if not chk_widget:
-                continue
-            chk = chk_widget.findChild(QCheckBox)
-            if not chk or not chk.isChecked():
+            recalc_item = self.calc_table.item(row, 0)
+            if not recalc_item or recalc_item.checkState() != Qt.CheckState.Checked:
                 cell.recalculate_bcch = False
                 cell.tch_indices_to_recalculate = []
                 cell.new_tch_count = 0
                 continue
 
-            # BCCH recalculation
-            bcch_widget = self.calc_table.cellWidget(row, 5)
-            if bcch_widget:
-                bcch_chk = bcch_widget.findChild(QCheckBox)
-                cell.recalculate_bcch = bcch_chk.isChecked() if bcch_chk else False
+            bcch_item = self.calc_table.item(row, 5)
+            cell.recalculate_bcch = (bcch_item is not None and bcch_item.checkState() == Qt.CheckState.Checked)
 
-            # TCH indices to recalculate
             tch_item = self.calc_table.item(row, 7)
             if tch_item and tch_item.text().strip():
                 indices = []
@@ -662,9 +665,11 @@ class MainWindow(QMainWindow):
             else:
                 cell.tch_indices_to_recalculate = []
 
-            # New TCH count
-            spin = self.calc_table.cellWidget(row, 8)
-            cell.new_tch_count = spin.value() if spin else 0
+            new_item = self.calc_table.item(row, 8)
+            try:
+                cell.new_tch_count = max(0, min(20, int(new_item.text().strip()))) if new_item else 0
+            except (ValueError, TypeError):
+                cell.new_tch_count = 0
 
     def _run_calculation(self):
         """Start the optimization process."""

@@ -41,6 +41,7 @@ class CellTableWidget(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
+        self.table.setUniformRowHeights(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -116,10 +117,14 @@ class CellTableWidget(QWidget):
                 self.table.setItem(row, len(base_cols) + j, item)
                 all_freqs.add(tch)
 
-        # Resize columns
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        # Resize columns efficiently without freezing on large datasets
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for c_idx in range(len(all_cols)):
+            self.table.setColumnWidth(c_idx, 80)
+        self.table.setColumnWidth(0, 110)  # Estación
+        self.table.setColumnWidth(1, 140)  # Nombre Est.
+        self.table.setColumnWidth(3, 110)  # Cell ID
 
         # Update stats
         self.lbl_count.setText(f"{len(cells)} celdas cargadas")

@@ -66,6 +66,7 @@ class SingleRunResultWidget(QWidget):
 
         self.assign_table = QTableWidget()
         self.assign_table.setAlternatingRowColors(True)
+        self.assign_table.setUniformRowHeights(True)
         self.assign_table.horizontalHeader().setStretchLastSection(True)
         self.assign_table.verticalHeader().setVisible(False)
         assign_layout.addWidget(self.assign_table)
@@ -234,9 +235,13 @@ class SingleRunResultWidget(QWidget):
                     item.setFont(font)
                 self.assign_table.setItem(row, col, item)
 
-        self.assign_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        header = self.assign_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for i in range(len(columns)):
+            self.assign_table.setColumnWidth(i, 90)
+        self.assign_table.setColumnWidth(1, 130)  # Estación
+        self.assign_table.setColumnWidth(6, 120)  # TCH Antes
+        self.assign_table.setColumnWidth(7, 120)  # TCH Después
 
     def _show_violations(self, result: PlanResult):
         self.viol_tree.clear()

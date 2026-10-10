@@ -302,9 +302,17 @@ def load_handovers(
     return warnings
 
 
+def _sanitize_csv_field(val: any) -> str:
+    """Sanitize string values to prevent CSV formula injection (DDE attacks)."""
+    s = str(val) if val is not None else ''
+    if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + s
+    return s
+
+
 def export_results(file_path: str, results: list, cells: dict[str, Cell]):
     """
-    Export calculation results to CSV.
+    Export calculation results to CSV with formula injection protection.
     """
     with open(file_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=';')
@@ -325,9 +333,9 @@ def export_results(file_path: str, results: list, cells: dict[str, Cell]):
                 writer.writerow([
                     result.plan_id,
                     f"{result.score:.1f}",
-                    assign.cell_id,
-                    cell.station.name if cell else '',
-                    cell.sector if cell else '',
+                    _sanitize_csv_field(assign.cell_id),
+                    _sanitize_csv_field(cell.station.name if cell else ''),
+                    _sanitize_csv_field(cell.sector if cell else ''),
                     cell.bcch if cell else '',
                     assign.bcch,
                     ','.join(str(f) for f in (cell.tch_list if cell else [])),

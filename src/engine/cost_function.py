@@ -107,6 +107,75 @@ def _get_freq_pairs(
     return pairs
 
 
+def precompute_close_cell_pairs(
+    cells: dict[str, Cell],
+    neighbor_graph: NeighborGraph,
+    threshold_km: float
+) -> list[tuple[str, str, float]]:
+    """
+    Precompute non-neighbor, different-station cell pairs within threshold_km.
+    Uses a spatial grid to achieve O(N) performance, eliminating O(N^2) pairwise loops.
+    Returns: [(cell_a_id, cell_b_id, distance_penalty), ...]
+    """
+    from src.models.neighbor import haversine_distance
+
+    neighbor_pairs = {
+        tuple(sorted((r.cell_a_id, r.cell_b_id)))
+        for r in neighbor_graph.all_relations()
+    }
+
+    station_cells: dict[str, list[str]] = {}
+    stations: dict[str, tuple[float, float]] = {}
+    for cid, cell in cells.items():
+        sid = cell.station.station_id
+        station_cells.setdefault(sid, []).append(cid)
+        if sid not in stations:
+            stations[sid] = (cell.station.latitude, cell.station.longitude)
+
+    grid_size_lat = max(0.01, threshold_km / 111.0)
+    grid: dict[tuple[int, int], list[str]] = {}
+
+    for sid, (lat, lon) in stations.items():
+        cos_lat = max(0.2, math.cos(math.radians(lat)))
+        grid_size_lon = max(0.01, threshold_km / (111.0 * cos_lat))
+        gx = int(lat / grid_size_lat)
+        gy = int(lon / grid_size_lon)
+        grid.setdefault((gx, gy), []).append(sid)
+
+    checked_stations: set[tuple[str, str]] = set()
+    close_cell_pairs: list[tuple[str, str, float]] = []
+
+    for (gx, gy), sids in grid.items():
+        neighbor_sids = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                neighbor_sids.extend(grid.get((gx + dx, gy + dy), []))
+
+        for sid_a in sids:
+            lat_a, lon_a = stations[sid_a]
+            for sid_b in neighbor_sids:
+                if sid_a >= sid_b:
+                    continue
+                st_pair = (sid_a, sid_b)
+                if st_pair in checked_stations:
+                    continue
+                checked_stations.add(st_pair)
+
+                lat_b, lon_b = stations[sid_b]
+                dist = haversine_distance(lat_a, lon_a, lat_b, lon_b)
+                if dist >= threshold_km:
+                    continue
+
+                dp = _distance_penalty(dist, threshold_km)
+                for ca_id in station_cells[sid_a]:
+                    for cb_id in station_cells[sid_b]:
+                        pair_key = tuple(sorted((ca_id, cb_id)))
+                        if pair_key not in neighbor_pairs:
+                            close_cell_pairs.append((ca_id, cb_id, dp))
+
+    return close_cell_pairs
+
+
 def evaluate_plan(
     assignments: dict[str, FrequencyAssignment],
     cells: dict[str, Cell],
@@ -114,7 +183,8 @@ def evaluate_plan(
     rules: FrequencyRules,
     plan_id: int = 0,
     run_id: int = 1,
-    collect_violations: bool = True
+    collect_violations: bool = True,
+    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None
 ) -> PlanResult:
     """
     Evaluate a complete frequency plan.
@@ -144,6 +214,13 @@ def evaluate_plan(
 
         a_assign = assignments[ca_id]
         b_assign = assignments[cb_id]
+
+        # Fast range overlap check: if frequency sets cannot produce diff <= 1, skip all pairs
+        all_a = [a_assign.bcch] + a_assign.tch_list
+        all_b = [b_assign.bcch] + b_assign.tch_list
+        if min(all_a) - 1 > max(all_b) or min(all_b) - 1 > max(all_a):
+            continue
+
         cell_a = cells.get(ca_id)
         cell_b = cells.get(cb_id)
         same_station = (cell_a and cell_b and
@@ -309,39 +386,21 @@ def evaluate_plan(
 
     # ── 4. Distance penalty for non-neighbor close cells ───────────
     if rules.enable_distance_penalty:
-        all_cell_ids = list(assignments.keys())
-        for i in range(len(all_cell_ids)):
-            for j in range(i + 1, len(all_cell_ids)):
-                ca_id = all_cell_ids[i]
-                cb_id = all_cell_ids[j]
-                pair_key = tuple(sorted((ca_id, cb_id)))
-                if pair_key in checked_pairs:
-                    continue
+        close_pairs = precomputed_close_pairs
+        if close_pairs is None:
+            close_pairs = precompute_close_cell_pairs(cells, neighbor_graph, rules.distance_threshold_km)
 
-                cell_a = cells.get(ca_id)
-                cell_b = cells.get(cb_id)
-                if not cell_a or not cell_b:
-                    continue
-                if cell_a.station.station_id == cell_b.station.station_id:
-                    continue
+        for ca_id, cb_id, dp in close_pairs:
+            a_assign = assignments.get(ca_id)
+            b_assign = assignments.get(cb_id)
+            if not a_assign or not b_assign:
+                continue
 
-                from src.models.neighbor import haversine_distance
-                dist = haversine_distance(
-                    cell_a.station.latitude, cell_a.station.longitude,
-                    cell_b.station.latitude, cell_b.station.longitude
-                )
-
-                if dist >= rules.distance_threshold_km:
-                    continue
-
-                dp = _distance_penalty(dist, rules.distance_threshold_km)
-                a_assign = assignments[ca_id]
-                b_assign = assignments[cb_id]
-
-                for freq_a, type_a, freq_b, type_b in _get_freq_pairs(a_assign, b_assign):
-                    diff = abs(freq_a - freq_b)
-                    if diff == 0:
-                        total_score += rules.weight_distance * dp
+            freqs_a = [a_assign.bcch] + a_assign.tch_list
+            freqs_b = [b_assign.bcch] + b_assign.tch_list
+            cochannel_count = len(set(freqs_a) & set(freqs_b))
+            if cochannel_count > 0:
+                total_score += rules.weight_distance * dp * cochannel_count
 
     result.score = total_score
     result.assignments = list(assignments.values())
@@ -355,7 +414,8 @@ def quick_score(
     assignments: dict[str, FrequencyAssignment],
     cells: dict[str, Cell],
     neighbor_graph: NeighborGraph,
-    rules: FrequencyRules
+    rules: FrequencyRules,
+    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None
 ) -> float:
     """
     Fast scoring without collecting detailed violations.
@@ -363,6 +423,8 @@ def quick_score(
     """
     result = evaluate_plan(
         assignments, cells, neighbor_graph, rules,
-        collect_violations=False
+        plan_id=0, run_id=1,
+        collect_violations=False,
+        precomputed_close_pairs=precomputed_close_pairs
     )
     return result.score

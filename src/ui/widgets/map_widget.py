@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEngineSettings
 
 from src.models.cell import Cell
 from src.models.frequency_plan import PlanResult, FrequencyAssignment
@@ -84,8 +85,11 @@ class MapWidget(QWidget):
 
         layout.addWidget(ctrl_box)
 
-        # WebEngine Map View
+        # WebEngine Map View with hardened security settings
         self.web_view = QWebEngineView()
+        settings = self.web_view.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, False)
         layout.addWidget(self.web_view, 1)
 
         # Load initial empty map HTML
@@ -93,56 +97,86 @@ class MapWidget(QWidget):
 
     def _load_html_template(self):
         """Generate and load the Leaflet HTML map document."""
-        html = """<!DOCTYPE html>
+        import os
+        leaflet_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "leaflet")
+        css_file = os.path.join(leaflet_dir, "leaflet.css")
+        js_file = os.path.join(leaflet_dir, "leaflet.js")
+
+        if os.path.isfile(css_file) and os.path.isfile(js_file):
+            try:
+                with open(css_file, "r", encoding="utf-8") as f:
+                    leaflet_css = f"<style>{f.read()}</style>"
+                with open(js_file, "r", encoding="utf-8") as f:
+                    leaflet_js = f"<script>{f.read()}</script>"
+            except Exception:
+                leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />'
+                leaflet_js = '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+        else:
+            leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />'
+            leaflet_js = '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+
+        html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8" />
     <title>2G Frequency Map</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    {leaflet_css}
+    {leaflet_js}
     <style>
-        html, body, #map {
+        html, body, #map {{
             height: 100%;
             width: 100%;
             margin: 0;
             padding: 0;
             background: #1a1a2e;
-        }
-        .leaflet-container {
+        }}
+        .leaflet-container {{
             background-color: #1a1a2e !important;
-        }
-        .sector-popup {
+        }}
+        .sector-popup {{
             color: #1a1a2e;
             font-family: 'Segoe UI', Arial, sans-serif;
             font-size: 12px;
-        }
-        .sector-popup b {
+        }}
+        .sector-popup b {{
             color: #0f3460;
-        }
-        .conflict-tooltip {
+        }}
+        .conflict-tooltip {{
             background: #16213e;
             color: #e0e0e8;
             border: 1px solid #00d4aa;
             border-radius: 4px;
             padding: 4px 8px;
             font-size: 11px;
-        }
+        }}
     </style>
 </head>
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([40.4168, -3.7038], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Use Canvas renderer for high-performance handling of thousands of sectors
+        var map = L.map('map', {{ preferCanvas: true }}).setView([40.4168, -3.7038], 13);
+        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
             maxZoom: 19,
             attribution: '© OpenStreetMap'
-        }).addTo(map);
+        }}).addTo(map);
 
         var sectorsLayer = L.layerGroup().addTo(map);
         var conflictsLayer = L.layerGroup().addTo(map);
+        window.totalCellsCount = 0;
+
+        function escapeHtml(str) {{
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }}
 
         // Helper: calculate destination point given distance & bearing
-        function getDestinationPoint(lat, lon, brng, distMeters) {
+        function getDestinationPoint(lat, lon, brng, distMeters) {{
             var R = 6371000;
             var rad = brng * Math.PI / 180;
             var lat1 = lat * Math.PI / 180;
@@ -154,78 +188,81 @@ class MapWidget(QWidget):
                               Math.cos(distMeters/R)-Math.sin(lat1)*Math.sin(lat2));
 
             return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
-        }
+        }}
 
         // Draw sector wedge (quesito)
-        function drawSector(lat, lon, azimuth, beamWidth, radiusMeters, color, cellData) {
+        function drawSector(lat, lon, azimuth, beamWidth, radiusMeters, color, cellData) {{
             var points = [[lat, lon]];
             var halfWidth = beamWidth / 2;
             var startAngle = azimuth - halfWidth;
             var endAngle = azimuth + halfWidth;
 
-            for (var a = startAngle; a <= endAngle; a += 5) {
+            // Adaptive step angle for large scale networks (>500 cells)
+            var step = (window.totalCellsCount > 500) ? 15 : 5;
+            for (var a = startAngle; a <= endAngle; a += step) {{
                 var pt = getDestinationPoint(lat, lon, a, radiusMeters);
                 points.push(pt);
-            }
+            }}
             points.push([lat, lon]);
 
-            var polygon = L.polygon(points, {
+            var polygon = L.polygon(points, {{
                 color: color,
                 fillColor: color,
                 fillOpacity: 0.5,
                 weight: 2
-            });
+            }});
 
             var popupContent = '<div class="sector-popup">' +
-                '<h3>📡 ' + cellData.cell_id + '</h3>' +
-                '<b>Estación:</b> ' + cellData.station_name + '<br/>' +
-                '<b>Sector:</b> ' + cellData.sector + ' | <b>Azimut:</b> ' + cellData.azimuth + '°<br/>' +
-                '<b>BCCH:</b> <span style="font-weight:bold;color:#00b894;">' + cellData.bcch + '</span><br/>' +
-                '<b>TCH:</b> ' + cellData.tch_list.join(', ') +
+                '<h3>📡 ' + escapeHtml(cellData.cell_id) + '</h3>' +
+                '<b>Estación:</b> ' + escapeHtml(cellData.station_name) + '<br/>' +
+                '<b>Sector:</b> ' + escapeHtml(cellData.sector) + ' | <b>Azimut:</b> ' + cellData.azimuth + '°<br/>' +
+                '<b>BCCH:</b> <span style="font-weight:bold;color:#00b894;">' + (cellData.bcch || '—') + '</span><br/>' +
+                '<b>TCH:</b> ' + (cellData.tch_list ? cellData.tch_list.join(', ') : '—') +
                 '</div>';
 
             polygon.bindPopup(popupContent);
             sectorsLayer.addLayer(polygon);
-        }
+        }}
 
         // Draw line connecting conflict cells
-        function drawConflictLine(lat1, lon1, lat2, lon2, type, text) {
+        function drawConflictLine(lat1, lon1, lat2, lon2, type, text) {{
             var isCo = (type === 'cochannel');
             var color = isCo ? '#e74c3c' : '#f39c12';
-            var line = L.polyline([[lat1, lon1], [lat2, lon2]], {
+            var line = L.polyline([[lat1, lon1], [lat2, lon2]], {{
                 color: color,
                 weight: isCo ? 3 : 2,
                 opacity: 0.8,
                 dashArray: isCo ? null : '6, 6'
-            });
+            }});
 
-            line.bindTooltip(text, {sticky: true, className: 'conflict-tooltip'});
+            line.bindTooltip(escapeHtml(text), {{sticky: true, className: 'conflict-tooltip'}});
             conflictsLayer.addLayer(line);
-        }
+        }}
 
-        function updateMapData(data) {
+        function updateMapData(data) {{
             sectorsLayer.clearLayers();
             conflictsLayer.clearLayers();
+            window.totalCellsCount = (data.cells ? data.cells.length : 0);
 
             var bounds = L.latLngBounds();
 
             // Render sector pie slices (quesitos)
-            data.cells.forEach(function(c) {
+            data.cells.forEach(function(c) {{
                 drawSector(c.lat, c.lon, c.azimuth, 60, 220, c.color, c);
                 bounds.extend([c.lat, c.lon]);
-            });
+            }});
 
             // Render conflict lines
-            if (data.conflicts) {
-                data.conflicts.forEach(function(cf) {
+            if (data.conflicts) {{
+                data.conflicts.forEach(function(cf) {{
                     drawConflictLine(cf.lat1, cf.lon1, cf.lat2, cf.lon2, cf.type, cf.text);
-                });
-            }
+                }});
+            }}
 
-            if (data.cells.length > 0) {
-                map.fitBounds(bounds, {padding: [50, 50]});
-            }
-        }
+            if (data.cells.length > 0) {{
+                map.fitBounds(bounds, {{padding: [50, 50]}});
+            }}
+        }}
     </script>
 </body>
 </html>"""
