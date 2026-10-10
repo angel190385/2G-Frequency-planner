@@ -4,7 +4,7 @@ This module is kept for potential standalone use.
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QGroupBox, QSpinBox, QGridLayout, QLineEdit
+    QGroupBox, QSpinBox, QGridLayout, QLineEdit, QScrollArea, QFrame, QWidget
 )
 from PyQt6.QtCore import Qt
 
@@ -22,9 +22,21 @@ class RangeConfigDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("📻 Rango de Frecuencias")
-        self.setMinimumSize(400, 250)
+        self.setMinimumSize(380, 220)
+        self.resize(440, 280)
 
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
+
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
 
         group = QGroupBox("Configurar rango ARFCN")
         g_layout = QGridLayout(group)
@@ -49,6 +61,9 @@ class RangeConfigDialog(QDialog):
 
         layout.addWidget(group)
 
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll, 1)
+
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -62,7 +77,7 @@ class RangeConfigDialog(QDialog):
         btn_ok.clicked.connect(self.accept)
         btn_layout.addWidget(btn_ok)
 
-        layout.addLayout(btn_layout)
+        main_layout.addLayout(btn_layout)
 
     def get_values(self) -> tuple[int, int, list[int]]:
         """Return the configured range values."""

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QSpinBox, QGridLayout, QLineEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QRadioButton, QButtonGroup,
-    QMessageBox, QSplitter, QWidget, QFrame
+    QMessageBox, QSplitter, QWidget, QFrame, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QFont
@@ -59,9 +59,25 @@ class RangeAdaptationDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("📻 Reconfiguración y Adaptación de Espectro (Rango Inicial → Final)")
-        self.setMinimumSize(850, 700)
+        self.setMinimumSize(700, 450)
+        self.resize(880, 640)
 
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(8)
+
+        # Scroll area for smooth vertical scrolling across all resolutions
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
+
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 10, 0)
         layout.setSpacing(10)
 
         # Header description
@@ -183,9 +199,11 @@ class RangeAdaptationDialog(QDialog):
         columns = ["Cell ID", "Estación", "Sector", "Tipo de Canal", "Frecuencia Actual (Eliminada)", "Acción Propuesta"]
         self.affected_table.setColumnCount(len(columns))
         self.affected_table.setHorizontalHeaderLabels(columns)
+        self.affected_table.setMinimumHeight(160)
+        self.affected_table.verticalHeader().setDefaultSectionSize(26)
         tg_layout.addWidget(self.affected_table)
 
-        layout.addWidget(table_group, 1)
+        layout.addWidget(table_group)
 
         # ── Group 4: Strategy Selection ───────────────────────────
         strat_group = QGroupBox("4. Estrategia de Aplicación")
@@ -239,7 +257,9 @@ class RangeAdaptationDialog(QDialog):
         self.btn_optimize_now.clicked.connect(self._on_apply_and_optimize)
         btn_layout.addWidget(self.btn_optimize_now)
 
-        layout.addLayout(btn_layout)
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll, 1)
+        main_layout.addLayout(btn_layout)
 
     def _create_metric_card(self, title: str, default_val: str, color_hex: str) -> QFrame:
         """Create a styled metric card."""

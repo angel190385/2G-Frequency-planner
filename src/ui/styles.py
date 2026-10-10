@@ -337,6 +337,16 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0px;
 }
 
+/* ── Scroll Areas ──────────────────────────────────────────────── */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea > QWidget > QWidget {
+    background: transparent;
+}
+
 /* ── Labels ────────────────────────────────────────────────────── */
 QLabel {
     color: #e0e0e8;

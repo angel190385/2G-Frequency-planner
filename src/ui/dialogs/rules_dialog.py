@@ -4,7 +4,7 @@ Rules configuration dialog for co-channel and adjacent channel settings.
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QCheckBox, QSpinBox, QDoubleSpinBox, QTabWidget,
-    QWidget, QGridLayout, QFrame, QLineEdit, QComboBox
+    QWidget, QGridLayout, QFrame, QLineEdit, QComboBox, QScrollArea
 )
 from PyQt6.QtCore import Qt
 
@@ -23,9 +23,22 @@ class RulesDialog(QDialog):
         self._setup_ui()
         self._load_from_rules()
 
+    def _wrap_tab_in_scroll(self, widget: QWidget) -> QScrollArea:
+        """Wrap tab contents in a smooth scroll area for small screens and laptops."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.setWidget(widget)
+        return scroll
+
     def _setup_ui(self):
         self.setWindowTitle("⚙️ Configuración de Reglas")
-        self.setMinimumSize(700, 650)
+        self.setMinimumSize(600, 400)
+        self.resize(750, 580)
 
         layout = QVBoxLayout(self)
 
@@ -35,6 +48,7 @@ class RulesDialog(QDialog):
         # ── Tab 1: Co-channel & Adjacent rules ─────────────────────
         rules_tab = QWidget()
         rules_layout = QVBoxLayout(rules_tab)
+        rules_layout.setContentsMargins(12, 12, 16, 12)
 
         # Co-channel group
         cochannel_group = QGroupBox("Cocanalidades (misma frecuencia)")
@@ -105,11 +119,12 @@ class RulesDialog(QDialog):
         rules_layout.addWidget(sep_group)
         rules_layout.addStretch()
 
-        tabs.addTab(rules_tab, "🔒 Reglas")
+        tabs.addTab(self._wrap_tab_in_scroll(rules_tab), "🔒 Reglas")
 
         # ── Tab 2: Weights & Statistical Models ────────────────────
         weights_tab = QWidget()
         weights_layout = QVBoxLayout(weights_tab)
+        weights_layout.setContentsMargins(12, 12, 16, 12)
 
         # Statistical Model Group
         stat_group = QGroupBox("📊 Modelo de Cálculo Estadístico de Handovers (Tráfico)")
@@ -200,11 +215,12 @@ class RulesDialog(QDialog):
         weights_layout.addWidget(dist_group)
         weights_layout.addStretch()
 
-        tabs.addTab(weights_tab, "⚖️ Pesos & Estadísticas")
+        tabs.addTab(self._wrap_tab_in_scroll(weights_tab), "⚖️ Pesos & Estadísticas")
 
         # ── Tab 3: Frequency Range ─────────────────────────────────
         freq_tab = QWidget()
         freq_layout = QVBoxLayout(freq_tab)
+        freq_layout.setContentsMargins(12, 12, 16, 12)
 
         range_group = QGroupBox("Rango de frecuencias (ARFCN)")
         range_layout = QGridLayout(range_group)
@@ -258,11 +274,12 @@ class RulesDialog(QDialog):
         self.txt_excluded.textChanged.connect(self._update_pool_preview)
 
         freq_layout.addStretch()
-        tabs.addTab(freq_tab, "📻 Frecuencias")
+        tabs.addTab(self._wrap_tab_in_scroll(freq_tab), "📻 Frecuencias")
 
         # ── Tab 4: Algorithm parameters ────────────────────────────
         algo_tab = QWidget()
         algo_layout = QVBoxLayout(algo_tab)
+        algo_layout.setContentsMargins(12, 12, 16, 12)
 
         algo_group = QGroupBox("Parámetros del Algoritmo Genético")
         ag_layout = QGridLayout(algo_group)
@@ -321,7 +338,7 @@ class RulesDialog(QDialog):
         algo_layout.addWidget(lbl_perf)
 
         algo_layout.addStretch()
-        tabs.addTab(algo_tab, "🧬 Algoritmo")
+        tabs.addTab(self._wrap_tab_in_scroll(algo_tab), "🧬 Algoritmo")
 
         layout.addWidget(tabs)
 

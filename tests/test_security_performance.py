@@ -131,6 +131,34 @@ class TestSecurityAndPerformance(unittest.TestCase):
         ht.load_data(self.neighbor_graph, self.cells)
         self.assertEqual(ht.table.rowCount(), len(self.neighbor_graph.all_relations()))
 
+    def test_dialogs_scroll_areas_and_minimum_size(self):
+        """Dialogs must have QScrollArea and responsive minimum height <= 450 for low resolutions."""
+        from PyQt6.QtWidgets import QApplication, QScrollArea
+        from src.ui.dialogs.rules_dialog import RulesDialog
+        from src.ui.dialogs.range_adaptation_dialog import RangeAdaptationDialog
+        from src.ui.dialogs.range_config import RangeConfigDialog
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        # 1. RulesDialog
+        rd = RulesDialog(self.rules, cells=self.cells)
+        self.assertLessEqual(rd.minimumHeight(), 450)
+        scrolls_rd = rd.findChildren(QScrollArea)
+        self.assertGreaterEqual(len(scrolls_rd), 4, "RulesDialog tabs must each contain a QScrollArea")
+
+        # 2. RangeAdaptationDialog
+        rad = RangeAdaptationDialog(self.cells, self.neighbor_graph, self.rules)
+        self.assertLessEqual(rad.minimumHeight(), 450)
+        scrolls_rad = rad.findChildren(QScrollArea)
+        self.assertGreaterEqual(len(scrolls_rad), 1, "RangeAdaptationDialog must have a QScrollArea")
+
+        # 3. RangeConfigDialog
+        rcd = RangeConfigDialog()
+        self.assertLessEqual(rcd.minimumHeight(), 300)
+        scrolls_rcd = rcd.findChildren(QScrollArea)
+        self.assertGreaterEqual(len(scrolls_rcd), 1, "RangeConfigDialog must have a QScrollArea")
+
 
 if __name__ == "__main__":
     unittest.main()
+
