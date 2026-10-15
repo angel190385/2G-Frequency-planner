@@ -1177,6 +1177,8 @@ def _build_html_template(payload: dict) -> str:
             s = "'" + s;
         }}
         return s;
+    }}
+
     function fmtNum(val) {{
         if (val === undefined || val === null || val === '') return '—';
         const num = Number(val);
