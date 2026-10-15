@@ -6,6 +6,8 @@ GSM 2G frequency planning and optimization tool.
 import sys
 import os
 
+import multiprocessing
+
 # Ensure the project root is in the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,6 +20,7 @@ from src.ui.styles import DARK_THEME
 
 
 def main():
+    multiprocessing.freeze_support()
     # High DPI support
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 

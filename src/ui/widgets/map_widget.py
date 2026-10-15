@@ -16,7 +16,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
 from src.models.cell import Cell
-from src.models.frequency_plan import PlanResult, FrequencyAssignment
+from src.models.frequency_plan import PlanResult, FrequencyAssignment, format_number
 from src.ui.styles import Colors
 
 
@@ -283,16 +283,16 @@ class MapWidget(QWidget):
         if per_run and len(per_run) > 1:
             for r in self.results:
                 self.combo_plan.addItem(
-                    f"🏆 Mejor Global - Plan {r.plan_id} (Score: {r.score:.1f}, Ej. {r.run_id})", r
+                    f"🏆 Mejor Global - Plan {r.plan_id} (Score: {format_number(r.score)}, Ej. {r.run_id})", r
                 )
             for run_idx in sorted(per_run.keys()):
                 for r in per_run[run_idx]:
                     self.combo_plan.addItem(
-                        f"Ejecución {run_idx} - Plan {r.plan_id} (Score: {r.score:.1f})", r
+                        f"Ejecución {run_idx} - Plan {r.plan_id} (Score: {format_number(r.score)})", r
                     )
         else:
             for r in self.results:
-                self.combo_plan.addItem(f"Plan {r.plan_id} (Score: {r.score:.1f})", r)
+                self.combo_plan.addItem(f"Plan {r.plan_id} (Score: {format_number(r.score)})", r)
 
         self.combo_plan.blockSignals(False)
 

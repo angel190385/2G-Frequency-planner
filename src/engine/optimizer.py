@@ -43,12 +43,14 @@ class FrequencyOptimizer:
         cells: dict[str, Cell],
         neighbor_graph: NeighborGraph,
         rules: FrequencyRules,
-        progress_callback: Optional[Callable[[int, int, float], None]] = None
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        max_workers: Optional[int] = None
     ):
         self.cells = cells
         self.neighbor_graph = neighbor_graph
         self.rules = rules
         self.progress_callback = progress_callback
+        self.max_workers = max_workers
         self._cancelled = False
 
         # Build the list of variables to optimize
@@ -373,9 +375,9 @@ class FrequencyOptimizer:
         best = min(indices, key=lambda i: scores[i])
         return population[best].copy()
 
-    def optimize(self) -> list[PlanResult]:
+    def optimize(self) -> OptimizationResultList:
         """
-        Run the genetic algorithm optimization across rules.num_runs independent passes.
+        Run the genetic algorithm optimization across all CPU cores utilizing multiprocessing.
 
         Returns top-K global best plans found across all runs, with .per_run attribute
         containing the top-K results for each individual run.
@@ -391,159 +393,18 @@ class FrequencyOptimizer:
             )
             return OptimizationResultList([result], per_run={1: [result]})
 
-        pop_size = self.rules.population_size
-        n_gen = self.rules.num_generations
-        elite_count = min(self.rules.elite_count, pop_size // 2)
-        top_k = self.rules.top_k_results
-        num_runs = max(1, self.rules.num_runs)
+        from src.engine.parallel import run_parallel_optimizer
 
-        per_run_results: dict[int, list[PlanResult]] = {}
-        all_candidates: list[tuple[float, np.ndarray, int]] = []  # (score, chrom, run_id)
+        variables_data = [(v.cell_id, v.slot_type, v.slot_index) for v in self.variables]
+        return run_parallel_optimizer(
+            cells=self.cells,
+            neighbor_graph=self.neighbor_graph,
+            rules=self.rules,
+            variables_data=variables_data,
+            progress_callback=self.progress_callback,
+            max_workers=self.max_workers,
+            cancel_check=lambda: self._cancelled
+        )
 
-        def _get_signature(chrom: np.ndarray) -> tuple:
-            assigns = self._chromosome_to_assignments(chrom)
-            return tuple(
-                (cid, assigns[cid].bcch, tuple(assigns[cid].tch_list))
-                for cid in sorted(assigns.keys())
-            )
-
-        # ── Outer loop over independent runs ───────────────────────
-        for run_idx in range(1, num_runs + 1):
-            if self._cancelled:
-                break
-
-            # ── Initialize fresh population for this run ───────────
-            population: list[np.ndarray] = []
-            for _ in range(pop_size):
-                chrom = self._generate_smart_chromosome()
-                population.append(chrom)
-
-            run_best_solutions: list[tuple[float, np.ndarray]] = []
-            run_signatures: set[tuple] = set()
-
-            best_score_ever = float('inf')
-
-            for gen in range(n_gen):
-                if self._cancelled:
-                    break
-
-                scores = np.zeros(pop_size)
-                for i, chrom in enumerate(population):
-                    assignments = self._chromosome_to_assignments(chrom)
-                    scores[i] = quick_score(
-                        assignments, self.cells, self.neighbor_graph, self.rules,
-                        precomputed_close_pairs=self.close_cell_pairs
-                    )
-
-                sorted_indices = np.argsort(scores)
-                for idx in sorted_indices[:top_k * 3]:
-                    score = float(scores[idx])
-                    chrom = population[idx]
-                    sig = _get_signature(chrom)
-
-                    if sig not in run_signatures:
-                        run_signatures.add(sig)
-                        run_best_solutions.append((score, chrom.copy()))
-                        run_best_solutions.sort(key=lambda x: x[0])
-                        if len(run_best_solutions) > top_k * 5:
-                            run_best_solutions = run_best_solutions[:top_k * 5]
-                            run_signatures = {_get_signature(c) for _, c in run_best_solutions}
-
-                gen_best = scores[sorted_indices[0]]
-                if gen_best < best_score_ever:
-                    best_score_ever = gen_best
-
-                # Progress callback: (run_idx, total_runs, gen, total_gens, best_score)
-                if self.progress_callback:
-                    try:
-                        self.progress_callback(run_idx, num_runs, gen + 1, n_gen, best_score_ever)
-                    except TypeError:
-                        self.progress_callback(gen + 1, n_gen, best_score_ever)
-
-                # Next generation evolution
-                new_population = []
-                for idx in sorted_indices[:elite_count]:
-                    new_population.append(population[idx].copy())
-
-                if gen > 0 and gen % 50 == 0:
-                    inject_count = max(1, pop_size // 10)
-                    for _ in range(inject_count):
-                        new_population.append(self._generate_smart_chromosome())
-
-                while len(new_population) < pop_size:
-                    if random.random() < self.rules.crossover_rate:
-                        p1 = self._tournament_select(population, scores)
-                        p2 = self._tournament_select(population, scores)
-                        c1, c2 = self._crossover(p1, p2)
-                        c1 = self._mutate(c1)
-                        c2 = self._mutate(c2)
-                        new_population.append(c1)
-                        if len(new_population) < pop_size:
-                            new_population.append(c2)
-                    else:
-                        p = self._tournament_select(population, scores)
-                        p = self._mutate(p)
-                        new_population.append(p)
-
-                population = new_population
-
-            # Build final evaluated PlanResult list for this run
-            run_results: list[PlanResult] = []
-            run_final_sigs: set[tuple] = set()
-
-            for (score, chrom) in run_best_solutions:
-                if len(run_results) >= top_k:
-                    break
-                sig = _get_signature(chrom)
-                if sig in run_final_sigs:
-                    continue
-                run_final_sigs.add(sig)
-
-                assignments = self._chromosome_to_assignments(chrom)
-                res = evaluate_plan(
-                    assignments, self.cells, self.neighbor_graph, self.rules,
-                    plan_id=len(run_results) + 1, run_id=run_idx, collect_violations=True,
-                    precomputed_close_pairs=self.close_cell_pairs
-                )
-                run_results.append(res)
-                all_candidates.append((score, chrom.copy(), run_idx))
-
-            if not run_results and population:
-                assignments = self._chromosome_to_assignments(population[0])
-                res = evaluate_plan(
-                    assignments, self.cells, self.neighbor_graph, self.rules,
-                    plan_id=1, run_id=run_idx, collect_violations=True,
-                    precomputed_close_pairs=self.close_cell_pairs
-                )
-                run_results.append(res)
-                all_candidates.append((res.score, population[0].copy(), run_idx))
-
-            per_run_results[run_idx] = run_results
-
-        # ── Global best aggregation across all runs ────────────────
-        all_candidates.sort(key=lambda x: x[0])
-        global_results: list[PlanResult] = []
-        global_sigs: set[tuple] = set()
-
-        for score, chrom, r_id in all_candidates:
-            if len(global_results) >= top_k:
-                break
-            sig = _get_signature(chrom)
-            if sig in global_sigs:
-                continue
-            global_sigs.add(sig)
-
-            assignments = self._chromosome_to_assignments(chrom)
-            res = evaluate_plan(
-                assignments, self.cells, self.neighbor_graph, self.rules,
-                plan_id=len(global_results) + 1, run_id=r_id, collect_violations=True,
-                precomputed_close_pairs=self.close_cell_pairs
-            )
-            global_results.append(res)
-
-        if not global_results:
-            global_results = per_run_results.get(1, [])
-
-        return OptimizationResultList(global_results, per_run=per_run_results)
 
 

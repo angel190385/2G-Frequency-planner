@@ -219,8 +219,8 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
             "freq_a": v.freq_a,
             "freq_b": v.freq_b,
             "ho": v.ho_count if v.ho_count is not None else 0,
-            "dist": round(v.distance_km, 2),
-            "cost": round(v.weighted_cost, 1),
+            "dist": int(v.distance_km) if v.distance_km.is_integer() else round(v.distance_km, 2),
+            "cost": int(v.weighted_cost) if v.weighted_cost.is_integer() else round(v.weighted_cost, 1),
             "severity": "critical" if both == "BCCH-BCCH" else ("high" if "BCCH" in both else "medium")
         })
 
@@ -229,7 +229,7 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
     return {
         "id": plan.plan_id,
         "name": name,
-        "score": round(plan.score, 1),
+        "score": int(plan.score) if plan.score.is_integer() else round(plan.score, 1),
         "critical_violations": plan.critical_violations,
         "total_violations": plan.total_violations,
         "cochannel_bcch_bcch": plan.cochannel_bcch_bcch,
@@ -238,8 +238,8 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
         "adjacent_bcch_bcch": plan.adjacent_bcch_bcch,
         "adjacent_bcch_tch": plan.adjacent_bcch_tch,
         "adjacent_tch_tch": plan.adjacent_tch_tch,
-        "cochannel_ho_weighted": round(plan.cochannel_ho_weighted, 1),
-        "adjacent_ho_weighted": round(plan.adjacent_ho_weighted, 1),
+        "cochannel_ho_weighted": int(plan.cochannel_ho_weighted) if plan.cochannel_ho_weighted.is_integer() else round(plan.cochannel_ho_weighted, 1),
+        "adjacent_ho_weighted": int(plan.adjacent_ho_weighted) if plan.adjacent_ho_weighted.is_integer() else round(plan.adjacent_ho_weighted, 1),
         "same_station": plan.same_station_cochannel + plan.same_station_adjacent,
         "modified_cells": modified_cells,
         "total_cells": len(cells),
@@ -1177,6 +1177,13 @@ def _build_html_template(payload: dict) -> str:
             s = "'" + s;
         }}
         return s;
+    function fmtNum(val) {{
+        if (val === undefined || val === null || val === '') return '—';
+        const num = Number(val);
+        if (isNaN(num)) return val;
+        if (Number.isInteger(num)) return Math.trunc(num).toString();
+        const s = num.toFixed(1);
+        return s.endsWith('.0') ? s.slice(0, -2) : s;
     }}
 
     function init() {{
@@ -1208,7 +1215,7 @@ def _build_html_template(payload: dict) -> str:
         baseCard.onclick = () => selectScenario(-1);
         baseCard.innerHTML = `
             <div class="title">🏛️ Plan Actual (Original)</div>
-            <div class="metric-score">${{base.score.toFixed(1)}}</div>
+            <div class="metric-score">${{fmtNum(base.score)}}</div>
             <div class="stats-row">
                 <span class="stat-pill">Críticas: ${{base.critical_violations}}</span>
                 <span class="stat-pill">Total Viol: ${{base.total_violations}}</span>
@@ -1226,7 +1233,7 @@ def _build_html_template(payload: dict) -> str:
             card.innerHTML = `
                 ${{recBadge}}
                 <div class="title">${{sc.name}}</div>
-                <div class="metric-score">${{sc.score.toFixed(1)}}</div>
+                <div class="metric-score">${{fmtNum(sc.score)}}</div>
                 <div class="stats-row">
                     <span class="stat-pill">Críticas: ${{sc.critical_violations}}</span>
                     <span class="stat-pill">Total: ${{sc.total_violations}}</span>
@@ -1266,7 +1273,7 @@ def _build_html_template(payload: dict) -> str:
             const diff = oldVal - newVal;
             if (diff === 0) return '<div class="kpi-change change-neutral">Sin cambio</div>';
             const isGood = lowerIsBetter ? (diff > 0) : (diff < 0);
-            const pct = oldVal > 0 ? ((Math.abs(diff) / oldVal) * 100).toFixed(1) : '0';
+            const pct = oldVal > 0 ? fmtNum((Math.abs(diff) / oldVal) * 100) : '0';
             const sign = diff > 0 ? '-' : '+';
             return `<div class="kpi-change ${{isGood ? 'change-good' : 'change-bad'}}">${{sign}}${{Math.abs(diff)}} (${{pct}}% ${{isGood ? 'mejora' : 'degradación'}})</div>`;
         }}
@@ -1274,7 +1281,7 @@ def _build_html_template(payload: dict) -> str:
         container.innerHTML = `
             <div class="kpi-card">
                 <div class="kpi-title">Score Global (Coste)</div>
-                <div class="kpi-value">${{plan.score.toFixed(1)}}</div>
+                <div class="kpi-value">${{fmtNum(plan.score)}}</div>
                 ${{activeScenarioIndex !== -1 ? diffHtml(plan.score, base.score) : '<div class="kpi-change change-neutral">Línea base</div>'}}
             </div>
             <div class="kpi-card">
@@ -1289,13 +1296,13 @@ def _build_html_template(payload: dict) -> str:
             </div>
             <div class="kpi-card">
                 <div class="kpi-title">Ponderación HO Cocanal</div>
-                <div class="kpi-value">${{plan.cochannel_ho_weighted.toFixed(1)}}</div>
+                <div class="kpi-value">${{fmtNum(plan.cochannel_ho_weighted)}}</div>
                 ${{activeScenarioIndex !== -1 ? diffHtml(plan.cochannel_ho_weighted, base.cochannel_ho_weighted) : '<div class="kpi-change change-neutral">Línea base</div>'}}
             </div>
             <div class="kpi-card">
                 <div class="kpi-title">Celdas Modificadas</div>
                 <div class="kpi-value" style="color: var(--accent-orange);">${{plan.modified_cells}} <span style="font-size: 14px; font-weight: normal; color: var(--text-muted);">/ ${{plan.total_cells}}</span></div>
-                <div class="kpi-change change-neutral">${{((plan.modified_cells / plan.total_cells) * 100).toFixed(1)}}% de la red</div>
+                <div class="kpi-change change-neutral">${{fmtNum((plan.modified_cells / plan.total_cells) * 100)}}% de la red</div>
             </div>
         `;
     }}
@@ -1308,7 +1315,7 @@ def _build_html_template(payload: dict) -> str:
         const s3 = data.scenarios[2] || null;
 
         const metrics = [
-            {{ name: "Score Global (Coste Total)", b: b.score.toFixed(1), s1: s1.score.toFixed(1), s2: s2 ? s2.score.toFixed(1) : "—", s3: s3 ? s3.score.toFixed(1) : "—", imp: s1.improvement_score }},
+            {{ name: "Score Global (Coste Total)", b: fmtNum(b.score), s1: fmtNum(s1.score), s2: s2 ? fmtNum(s2.score) : "—", s3: s3 ? fmtNum(s3.score) : "—", imp: s1.improvement_score }},
             {{ name: "Violaciones Críticas (BCCH-BCCH)", b: b.critical_violations, s1: s1.critical_violations, s2: s2 ? s2.critical_violations : "—", s3: s3 ? s3.critical_violations : "—", imp: s1.improvement_critical }},
             {{ name: "Total Violaciones (Cocanal + Adj)", b: b.total_violations, s1: s1.total_violations, s2: s2 ? s2.total_violations : "—", s3: s3 ? s3.total_violations : "—", imp: s1.improvement_violations }},
             {{ name: "Cocanalidad BCCH-BCCH", b: b.cochannel_bcch_bcch, s1: s1.cochannel_bcch_bcch, s2: s2 ? s2.cochannel_bcch_bcch : "—", s3: s3 ? s3.cochannel_bcch_bcch : "—", imp: "-" }},
@@ -1317,10 +1324,10 @@ def _build_html_template(payload: dict) -> str:
             {{ name: "Adyacencia BCCH-BCCH", b: b.adjacent_bcch_bcch, s1: s1.adjacent_bcch_bcch, s2: s2 ? s2.adjacent_bcch_bcch : "—", s3: s3 ? s3.adjacent_bcch_bcch : "—", imp: "-" }},
             {{ name: "Adyacencia BCCH-TCH", b: b.adjacent_bcch_tch, s1: s1.adjacent_bcch_tch, s2: s2 ? s2.adjacent_bcch_tch : "—", s3: s3 ? s3.adjacent_bcch_tch : "—", imp: "-" }},
             {{ name: "Adyacencia TCH-TCH", b: b.adjacent_tch_tch, s1: s1.adjacent_tch_tch, s2: s2 ? s2.adjacent_tch_tch : "—", s3: s3 ? s3.adjacent_tch_tch : "—", imp: "-" }},
-            {{ name: "Ponderación HO Cocanal", b: b.cochannel_ho_weighted.toFixed(1), s1: s1.cochannel_ho_weighted.toFixed(1), s2: s2 ? s2.cochannel_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.cochannel_ho_weighted.toFixed(1) : "—", imp: "-" }},
-            {{ name: "Ponderación HO Adyacente", b: b.adjacent_ho_weighted.toFixed(1), s1: s1.adjacent_ho_weighted.toFixed(1), s2: s2 ? s2.adjacent_ho_weighted.toFixed(1) : "—", s3: s3 ? s3.adjacent_ho_weighted.toFixed(1) : "—", imp: "-" }},
+            {{ name: "Ponderación HO Cocanal", b: fmtNum(b.cochannel_ho_weighted), s1: fmtNum(s1.cochannel_ho_weighted), s2: s2 ? fmtNum(s2.cochannel_ho_weighted) : "—", s3: s3 ? fmtNum(s3.cochannel_ho_weighted) : "—", imp: "-" }},
+            {{ name: "Ponderación HO Adyacente", b: fmtNum(b.adjacent_ho_weighted), s1: fmtNum(s1.adjacent_ho_weighted), s2: s2 ? fmtNum(s2.adjacent_ho_weighted) : "—", s3: s3 ? fmtNum(s3.adjacent_ho_weighted) : "—", imp: "-" }},
             {{ name: "Conflictos Misma Estación", b: b.same_station, s1: s1.same_station, s2: s2 ? s2.same_station : "—", s3: s3 ? s3.same_station : "—", imp: "-" }},
-            {{ name: "Celdas Modificadas", b: "0", s1: `${{s1.modified_cells}} (${{((s1.modified_cells/b.total_cells)*100).toFixed(1)}}%)`, s2: s2 ? `${{s2.modified_cells}}` : "—", s3: s3 ? `${{s3.modified_cells}}` : "—", imp: "-" }}
+            {{ name: "Celdas Modificadas", b: "0", s1: `${{s1.modified_cells}} (${{fmtNum((s1.modified_cells/b.total_cells)*100)}}%)`, s2: s2 ? `${{s2.modified_cells}}` : "—", s3: s3 ? `${{s3.modified_cells}}` : "—", imp: "-" }}
         ];
 
         tbody.innerHTML = metrics.map(m => `
@@ -1614,7 +1621,7 @@ def _build_html_template(payload: dict) -> str:
         }});
 
         const freeCount = allChannels.length - usedCount;
-        const avgReusage = usedCount > 0 ? (totalReusage / usedCount).toFixed(1) : '0';
+        const avgReusage = usedCount > 0 ? fmtNum(totalReusage / usedCount) : '0';
 
         document.getElementById('mini-kpi-used').innerText = `${{usedCount}} / ${{allChannels.length}}`;
         document.getElementById('mini-kpi-peak').innerText = peakChannel ? `${{peakReusage}} celdas (ARFCN ${{peakChannel}})` : '0';

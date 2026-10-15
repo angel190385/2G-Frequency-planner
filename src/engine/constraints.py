@@ -130,9 +130,10 @@ class FrequencyRules:
         Returns True if the conflict is NOT allowed (hard violation).
         """
         if same_station:
-            if is_cochannel and not self.allow_cochannel_same_station:
+            # Under no circumstances can frequencies repeat within the same station / distance = 0
+            if is_cochannel:
                 return True
-            if not is_cochannel and not self.allow_adjacent_same_station:
+            if not self.allow_adjacent_same_station:
                 return True
             return False
 
