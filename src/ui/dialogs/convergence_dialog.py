@@ -45,6 +45,11 @@ class ConvergenceDialog(QDialog):
         self.total_runs = max(1, total_runs)
         self.total_gens = max(1, total_gens)
 
+        self.global_best_score: float = float("inf")
+        self.current_gens: dict[int, int] = {r: 0 for r in range(1, self.total_runs + 1)}
+        self.run_best_scores: dict[int, float] = {r: float("inf") for r in range(1, self.total_runs + 1)}
+        self.run_row_labels: dict[int, tuple[QLabel, QLabel]] = {}
+
         # History tracking per run: run_idx -> (list of x, list of y)
         self.histories: dict[int, tuple[list[int], list[float]]] = {
             r: ([], []) for r in range(1, self.total_runs + 1)
@@ -57,8 +62,8 @@ class ConvergenceDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("📈 Progreso de la Optimización — Iteración vs Coste")
-        self.setMinimumSize(850, 580)
-        self.resize(1000, 680)
+        self.setMinimumSize(850, 600)
+        self.resize(1020, 700)
 
         # Dark theme dialog styling
         self.setStyleSheet(f"""
@@ -87,14 +92,19 @@ class ConvergenceDialog(QDialog):
         """)
         hf_layout = QVBoxLayout(header_frame)
         hf_layout.setContentsMargins(10, 8, 10, 8)
-        hf_layout.setSpacing(6)
+        hf_layout.setSpacing(8)
 
         top_row = QHBoxLayout()
         self.lbl_title = QLabel("🚀 Optimizando Frecuencias...")
-        self.lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {Colors.ACCENT};")
+        self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.ACCENT};")
         top_row.addWidget(self.lbl_title)
         top_row.addStretch()
 
+        self.lbl_best = QLabel("🏆 Mejor coste global: —")
+        self.lbl_best.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {Colors.SUCCESS};")
+        top_row.addWidget(self.lbl_best)
+
+        top_row.addSpacing(16)
         self.lbl_timer = QLabel("⏱️ 00:00")
         self.lbl_timer.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {Colors.TEXT_DIM};")
         top_row.addWidget(self.lbl_timer)
@@ -104,12 +114,13 @@ class ConvergenceDialog(QDialog):
         self.progress_bar.setRange(0, self.total_runs * self.total_gens)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("0% (0 / %m iteraciones)")
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
                 background-color: {Colors.BG_PRIMARY};
                 border: 1px solid {Colors.BORDER};
                 border-radius: 4px;
-                height: 18px;
+                height: 20px;
                 text-align: center;
                 color: {Colors.TEXT};
                 font-size: 11px;
@@ -122,17 +133,59 @@ class ConvergenceDialog(QDialog):
         """)
         hf_layout.addWidget(self.progress_bar)
 
-        bottom_row = QHBoxLayout()
-        self.lbl_status = QLabel("Iniciando cálculo...")
-        self.lbl_status.setStyleSheet(f"font-size: 12px; color: {Colors.TEXT_DIM};")
-        bottom_row.addWidget(self.lbl_status)
-        bottom_row.addStretch()
+        # Dedicated line for each execution
+        runs_frame = QFrame()
+        runs_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+        """)
+        if self.total_runs <= 3:
+            rf_layout = QVBoxLayout(runs_frame)
+            rf_layout.setContentsMargins(8, 4, 8, 4)
+            rf_layout.setSpacing(4)
+        else:
+            rf_layout = QGridLayout(runs_frame)
+            rf_layout.setContentsMargins(8, 4, 8, 4)
+            rf_layout.setHorizontalSpacing(24)
+            rf_layout.setVerticalSpacing(4)
 
-        self.lbl_best = QLabel("Mejor coste: —")
-        self.lbl_best.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {Colors.SUCCESS};")
-        bottom_row.addWidget(self.lbl_best)
-        hf_layout.addLayout(bottom_row)
+        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308"]
 
+        for r in range(1, self.total_runs + 1):
+            c = colors[(r - 1) % len(colors)]
+            row_w = QWidget()
+            row_l = QHBoxLayout(row_w)
+            row_l.setContentsMargins(0, 0, 0, 0)
+            row_l.setSpacing(12)
+
+            lbl_name = QLabel(f"● Ejecución {r}:")
+            lbl_name.setStyleSheet(f"color: {c}; font-weight: bold; font-size: 12px; min-width: 95px;")
+
+            lbl_iter = QLabel(f"Iteración 0/{self.total_gens} (0%)")
+            lbl_iter.setStyleSheet(f"color: {Colors.TEXT}; font-size: 11px; min-width: 140px;")
+
+            lbl_cost = QLabel("Mejor coste: —")
+            lbl_cost.setStyleSheet(f"color: {Colors.TEXT_DIM}; font-size: 11px;")
+
+            row_l.addWidget(lbl_name)
+            row_l.addWidget(lbl_iter)
+            row_l.addWidget(lbl_cost)
+            row_l.addStretch()
+
+            self.run_row_labels[r] = (lbl_iter, lbl_cost)
+
+            if self.total_runs <= 3:
+                rf_layout.addWidget(row_w)
+            else:
+                col = (r - 1) % 2
+                row_idx = (r - 1) // 2
+                rf_layout.addWidget(row_w, row_idx, col)
+
+        hf_layout.addWidget(runs_frame)
         layout.addWidget(header_frame)
 
         # ── Matplotlib Plots ─────────────────────────────────────
@@ -238,28 +291,40 @@ class ConvergenceDialog(QDialog):
         if self.is_finished:
             return
 
-        # Record history
+        # 1. Record history & update plot curve
         x_vals, y_vals = self.histories.setdefault(run_idx, ([], []))
         x_vals.append(gen)
         y_vals.append(best_score)
 
-        # Update line
         if run_idx in self.lines:
             line = self.lines[run_idx]
             line.set_data(x_vals, y_vals)
-
             ax = self.axes[run_idx - 1]
             ax.relim()
             ax.autoscale_view()
 
-        # Update progress bar
-        completed_steps = sum(len(x) for x, _ in self.histories.values())
-        self.progress_bar.setValue(min(self.progress_bar.maximum(), completed_steps))
+        # 2. Track current gen and best score per run
+        self.current_gens[run_idx] = max(self.current_gens.get(run_idx, 0), gen)
+        self.run_best_scores[run_idx] = min(self.run_best_scores.get(run_idx, float("inf")), best_score)
 
-        # Update labels with clean numbers (no .0)
-        clean_score = format_number(best_score)
-        self.lbl_status.setText(f"Ejecución {run_idx}/{total_runs} — Iteración {gen}/{total_gens}")
-        self.lbl_best.setText(f"Mejor coste: {clean_score}")
+        # 3. Overall best score (monotonically improves, never dances)
+        if best_score < self.global_best_score:
+            self.global_best_score = best_score
+            self.lbl_best.setText(f"🏆 Mejor coste global: {format_number(self.global_best_score)}")
+
+        # 4. Progress bar fills smoothly as a whole across all runs
+        total_work = self.total_runs * self.total_gens
+        completed_gens = sum(self.current_gens.values())
+        self.progress_bar.setValue(min(total_work, completed_gens))
+        pct = int((completed_gens / total_work) * 100) if total_work > 0 else 0
+        self.progress_bar.setFormat(f"{pct}% ({completed_gens}/{total_work} iteraciones)")
+
+        # 5. Update only this execution's fixed line (never dances!)
+        if run_idx in self.run_row_labels:
+            lbl_iter, lbl_cost = self.run_row_labels[run_idx]
+            run_pct = int((gen / total_gens) * 100) if total_gens > 0 else 0
+            lbl_iter.setText(f"Iteración {gen}/{total_gens} ({run_pct}%)")
+            lbl_cost.setText(f"Mejor coste: {format_number(self.run_best_scores[run_idx])}")
 
         self.canvas.draw_idle()
 
@@ -267,13 +332,26 @@ class ConvergenceDialog(QDialog):
         """Called when optimization completes."""
         self.is_finished = True
         self.timer.stop()
-        self.progress_bar.setValue(self.progress_bar.maximum())
+        total_work = self.total_runs * self.total_gens
+        self.progress_bar.setValue(total_work)
+        self.progress_bar.setFormat(f"100% ({total_work}/{total_work} iteraciones)")
         self.lbl_title.setText("✅ Optimización Completada con Éxito")
-        self.lbl_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {Colors.SUCCESS};")
+        self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.SUCCESS};")
 
-        clean_score = format_number(best_score) if best_score is not None else "—"
-        self.lbl_best.setText(f"🏆 Score Óptimo: {clean_score}")
-        self.lbl_status.setText("Cálculo finalizado. Revisa las curvas de evolución.")
+        final_best = best_score if best_score is not None else self.global_best_score
+        clean_score = format_number(final_best) if final_best != float("inf") else "—"
+        self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}")
+
+        for r in range(1, self.total_runs + 1):
+            if r in self.run_row_labels:
+                lbl_iter, lbl_cost = self.run_row_labels[r]
+                lbl_iter.setText(f"Iteración {self.total_gens}/{self.total_gens} (100%) — Finalizada")
+                r_best = self.run_best_scores.get(r, float("inf"))
+                if r_best == final_best and r_best != float("inf"):
+                    lbl_cost.setText(f"Coste final: {format_number(r_best)} ★ (Mejor)")
+                    lbl_cost.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 11px; font-weight: bold;")
+                else:
+                    lbl_cost.setText(f"Coste final: {format_number(r_best if r_best != float('inf') else '—')}")
 
         self.btn_action.setText("✓ Ver Resultados y Cerrar")
         self.btn_action.setStyleSheet(f"""
@@ -297,7 +375,8 @@ class ConvergenceDialog(QDialog):
     def _on_action_clicked(self):
         if not self.is_finished:
             self.cancelled.emit()
-            self.lbl_status.setText("Cancelando cálculo...")
+            self.lbl_title.setText("⛔ Cancelando cálculo...")
+            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #d63031;")
             self.btn_action.setEnabled(False)
         else:
             self.accept()

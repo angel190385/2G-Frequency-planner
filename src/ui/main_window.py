@@ -337,12 +337,7 @@ class MainWindow(QMainWindow):
 
         right_layout.addStretch()
 
-        # Progress
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setTextVisible(True)
-        right_layout.addWidget(self.progress_bar)
-
+        # Progress status label
         self.lbl_progress = QLabel("")
         self.lbl_progress.setObjectName("label_subtitle")
         self.lbl_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -707,11 +702,8 @@ class MainWindow(QMainWindow):
         # Prepare: we pass ALL cells (for context) but only some have variables
         self.btn_calculate.setEnabled(False)
         self.btn_cancel.setVisible(True)
-        self.progress_bar.setVisible(True)
-        total_steps = self.rules.num_generations * max(1, self.rules.num_runs)
-        self.progress_bar.setRange(0, total_steps)
-        self.progress_bar.setValue(0)
-        self.lbl_progress.setText(f"Iniciando {self.rules.num_runs} ejecuciones...")
+        self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")
+        self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
 
         # Open real-time convergence dialog
         self.convergence_dialog = ConvergenceDialog(
@@ -740,14 +732,7 @@ class MainWindow(QMainWindow):
             self.lbl_progress.setText("Cancelando...")
 
     def _on_optimization_progress(self, run_idx, total_runs, gen, total_gens, best_score):
-        """Update progress bar and label for multi-run execution."""
-        current_step = (run_idx - 1) * total_gens + gen
-        self.progress_bar.setValue(current_step)
-        clean_score = format_number(best_score)
-        self.lbl_progress.setText(
-            f"Ejecución {run_idx}/{total_runs} — Generación {gen}/{total_gens} — "
-            f"Mejor score: {clean_score}"
-        )
+        """Forward progress directly to the real-time convergence dialog without jittering main window."""
         if hasattr(self, "convergence_dialog") and self.convergence_dialog:
             self.convergence_dialog.update_progress(run_idx, total_runs, gen, total_gens, best_score)
 
@@ -756,7 +741,6 @@ class MainWindow(QMainWindow):
         self.results = results
         self.btn_calculate.setEnabled(True)
         self.btn_cancel.setVisible(False)
-        self.progress_bar.setVisible(False)
 
         n = len(results)
         best = min((r.score for r in results), default=0)
@@ -783,7 +767,6 @@ class MainWindow(QMainWindow):
         """Handle optimization error."""
         self.btn_calculate.setEnabled(True)
         self.btn_cancel.setVisible(False)
-        self.progress_bar.setVisible(False)
         self.lbl_progress.setText(f"❌ Error: {error_msg}")
         self.lbl_progress.setStyleSheet(f"color: {Colors.DANGER};")
 
