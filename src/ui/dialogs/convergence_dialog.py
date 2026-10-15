@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QProgressBar, QWidget, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
