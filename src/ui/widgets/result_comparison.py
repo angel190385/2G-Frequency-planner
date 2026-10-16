@@ -5,7 +5,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QAbstractItemView, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QGroupBox, QFrame, QTabWidget
+    QTreeWidget, QTreeWidgetItem, QGroupBox, QFrame, QTabWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QFont
@@ -387,8 +387,14 @@ class ConvergenceTabWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        fig = Figure(facecolor="#141a24")
+        fig = Figure(facecolor="#141a24", layout="constrained")
+        if hasattr(fig, "get_layout_engine") and fig.get_layout_engine():
+            fig.get_layout_engine().set(w_pad=0.08, h_pad=0.08, wspace=0.06, hspace=0.06)
+        else:
+            fig.set_constrained_layout_pads(w_pad=0.08, h_pad=0.08, wspace=0.06, hspace=0.06)
         canvas = FigureCanvasQTAgg(fig)
+        canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        canvas.setMinimumHeight(320)
         layout.addWidget(canvas)
 
         ax = fig.add_subplot(1, 1, 1)
@@ -396,10 +402,10 @@ class ConvergenceTabWidget(QWidget):
         num_runs = len(per_run_history)
         title_text = "Comparación de Convergencia por Ejecución (Iteración vs Coste)" if num_runs > 1 else "Convergencia de la Optimización (Iteración vs Coste)"
         ax.set_title(title_text, color="#f0f4f8", fontsize=12, fontweight="bold", pad=10)
-        ax.set_xlabel("Iteración / Generación", color="#8b9bb4", fontsize=10, labelpad=6)
-        ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10, labelpad=6)
+        ax.set_xlabel("Iteración / Generación", color="#94a3b8", fontsize=10, fontweight="bold", labelpad=8)
+        ax.set_ylabel("Coste (Score)", color="#94a3b8", fontsize=10, fontweight="bold", labelpad=8)
         ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
-        ax.tick_params(colors="#8b9bb4", labelsize=9)
+        ax.tick_params(axis="both", which="major", colors="#8b9bb4", labelsize=9, pad=5)
         for spine in ax.spines.values():
             spine.set_color("#2b384e")
 
@@ -420,7 +426,6 @@ class ConvergenceTabWidget(QWidget):
             )
 
         ax.legend(facecolor="#16213e", edgecolor="#2b384e", labelcolor="#f0f4f8", fontsize=9, loc="upper right")
-        fig.tight_layout(pad=2.0)
         canvas.draw_idle()
 
 

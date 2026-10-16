@@ -458,6 +458,7 @@ class Colors:
     ACCENT_BLUE = "#0abde3"
     TEXT = "#e0e0e8"
     TEXT_DIM = "#8888a0"
+    TEXT_MUTED = "#8888a0"
     BORDER = "#0f3460"
     BORDER_HOVER = "#1a5276"
     DANGER = "#e74c3c"

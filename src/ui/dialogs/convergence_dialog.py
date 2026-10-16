@@ -7,7 +7,7 @@ import time
 from typing import Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
-    QProgressBar, QWidget, QFrame
+    QProgressBar, QWidget, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QIcon
@@ -20,6 +20,18 @@ from matplotlib.ticker import FuncFormatter
 
 from src.models.frequency_plan import format_number
 from src.ui.styles import Colors
+
+RUN_COLORS = [
+    "#00d4aa",  # Cyan/Teal (Ejecución 1)
+    "#38bdf8",  # Sky Blue (Ejecución 2)
+    "#fb923c",  # Orange (Ejecución 3)
+    "#a855f7",  # Purple (Ejecución 4)
+    "#f43f5e",  # Rose (Ejecución 5)
+    "#10b981",  # Emerald (Ejecución 6)
+    "#eab308",  # Yellow (Ejecución 7)
+    "#ec4899",  # Pink (Ejecución 8)
+    "#6366f1",  # Indigo (Ejecución 9)
+]
 
 
 def _axis_formatter(val, pos):
@@ -39,6 +51,11 @@ class ConvergenceDialog(QDialog):
     Dialog displaying live iteration vs cost plots during optimization.
     """
     cancelled = pyqtSignal()
+    RUN_COLORS = RUN_COLORS
+
+    @classmethod
+    def get_run_color(cls, run_idx: int) -> str:
+        return cls.RUN_COLORS[(run_idx - 1) % len(cls.RUN_COLORS)]
 
     def __init__(self, total_runs: int, total_gens: int, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -62,8 +79,8 @@ class ConvergenceDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("📈 Progreso de la Optimización — Iteración vs Coste")
-        self.setMinimumSize(850, 600)
-        self.resize(1020, 700)
+        self.setMinimumSize(900, 620)
+        self.resize(1050, 720)
 
         # Dark theme dialog styling
         self.setStyleSheet(f"""
@@ -101,7 +118,15 @@ class ConvergenceDialog(QDialog):
         top_row.addStretch()
 
         self.lbl_best = QLabel("🏆 Mejor coste global: —")
-        self.lbl_best.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {Colors.SUCCESS};")
+        self.lbl_best.setStyleSheet(f"""
+            font-size: 13px;
+            font-weight: bold;
+            color: {Colors.TEXT_MUTED};
+            padding: 3px 8px;
+            border: 1px solid {Colors.BORDER};
+            border-radius: 4px;
+            background-color: #0c1017;
+        """)
         top_row.addWidget(self.lbl_best)
 
         top_row.addSpacing(16)
@@ -153,10 +178,8 @@ class ConvergenceDialog(QDialog):
             rf_layout.setHorizontalSpacing(24)
             rf_layout.setVerticalSpacing(4)
 
-        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308"]
-
         for r in range(1, self.total_runs + 1):
-            c = colors[(r - 1) % len(colors)]
+            c = self.get_run_color(r)
             row_w = QWidget()
             row_l = QHBoxLayout(row_w)
             row_l.setContentsMargins(0, 0, 0, 0)
@@ -188,20 +211,35 @@ class ConvergenceDialog(QDialog):
         hf_layout.addWidget(runs_frame)
         layout.addWidget(header_frame)
 
-        # ── Matplotlib Plots ─────────────────────────────────────
-        self.figure = Figure(facecolor="#141a24")
+        # ── Matplotlib Plots Frame ──────────────────────────────
+        plot_frame = QFrame()
+        plot_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: #141a24;
+                border: 1px solid {Colors.BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        pf_layout = QVBoxLayout(plot_frame)
+        pf_layout.setContentsMargins(6, 6, 6, 6)
+
+        self.figure = Figure(facecolor="#141a24", layout="constrained")
+        if hasattr(self.figure, "get_layout_engine") and self.figure.get_layout_engine():
+            self.figure.get_layout_engine().set(w_pad=0.08, h_pad=0.08, wspace=0.06, hspace=0.06)
+        else:
+            self.figure.set_constrained_layout_pads(w_pad=0.08, h_pad=0.08, wspace=0.06, hspace=0.06)
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.canvas.setMinimumHeight(320)
         self.canvas.setStyleSheet("background: transparent;")
-        layout.addWidget(self.canvas, 1)
+        pf_layout.addWidget(self.canvas)
+
+        layout.addWidget(plot_frame, 1)
 
         self._init_plots()
 
         # ── Footer ───────────────────────────────────────────────
         footer_layout = QHBoxLayout()
-        self.lbl_cpu_info = QLabel("⚡ Multinúcleo activo — 100% CPU")
-        self.lbl_cpu_info.setStyleSheet(f"color: {Colors.ACCENT_BLUE}; font-size: 11px;")
-        footer_layout.addWidget(self.lbl_cpu_info)
-
         footer_layout.addStretch()
 
         self.btn_action = QPushButton("⛔ Cancelar cálculo")
@@ -233,10 +271,10 @@ class ConvergenceDialog(QDialog):
 
         title_text = "Comparación de Convergencia por Ejecución (Iteración vs Coste)" if self.total_runs > 1 else "Convergencia de la Optimización (Iteración vs Coste)"
         self.ax.set_title(title_text, color="#f0f4f8", fontsize=12, fontweight="bold", pad=10)
-        self.ax.set_xlabel("Iteración / Generación", color="#8b9bb4", fontsize=10, labelpad=6)
-        self.ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10, labelpad=6)
+        self.ax.set_xlabel("Iteración / Generación", color="#94a3b8", fontsize=10, fontweight="bold", labelpad=8)
+        self.ax.set_ylabel("Coste (Score)", color="#94a3b8", fontsize=10, fontweight="bold", labelpad=8)
         self.ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
-        self.ax.tick_params(colors="#8b9bb4", labelsize=9)
+        self.ax.tick_params(axis="both", which="major", colors="#8b9bb4", labelsize=9, pad=5)
 
         for spine in self.ax.spines.values():
             spine.set_color("#2b384e")
@@ -245,11 +283,11 @@ class ConvergenceDialog(QDialog):
         self.ax.xaxis.set_major_formatter(formatter)
         self.ax.yaxis.set_major_formatter(formatter)
 
-        self.lines = {}
-        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308", "#ec4899", "#6366f1"]
+        self.ax.set_xlim(0, max(self.total_gens, 1))
 
+        self.lines = {}
         for r in range(1, self.total_runs + 1):
-            c = colors[(r - 1) % len(colors)]
+            c = self.get_run_color(r)
             label = f"Ejecución {r}"
             line, = self.ax.plot(
                 [], [],
@@ -273,7 +311,6 @@ class ConvergenceDialog(QDialog):
             framealpha=0.85
         )
 
-        self.figure.tight_layout(pad=2.0)
         self.canvas.draw_idle()
 
     def _setup_timer(self):
@@ -301,17 +338,38 @@ class ConvergenceDialog(QDialog):
         if run_idx in self.lines:
             line = self.lines[run_idx]
             line.set_data(x_vals, y_vals)
+            max_x = max(self.total_gens, max(x_vals) if x_vals else self.total_gens, 1)
+            self.ax.set_xlim(0, max_x)
             self.ax.relim()
-            self.ax.autoscale_view()
+            self.ax.autoscale_view(scalex=False, scaley=True)
 
         # 2. Track current gen and best score per run
         self.current_gens[run_idx] = max(self.current_gens.get(run_idx, 0), gen)
         self.run_best_scores[run_idx] = min(self.run_best_scores.get(run_idx, float("inf")), best_score)
 
-        # 3. Overall best score (monotonically improves, never dances)
-        if best_score < self.global_best_score:
-            self.global_best_score = best_score
-            self.lbl_best.setText(f"🏆 Mejor coste global: {format_number(self.global_best_score)}")
+        # 3. Overall best score & dynamic color based on the leading execution
+        best_run = None
+        min_score = float("inf")
+        for r in range(1, self.total_runs + 1):
+            sc = self.run_best_scores.get(r, float("inf"))
+            if sc < min_score:
+                min_score = sc
+                best_run = r
+
+        if best_run is not None and min_score < float("inf"):
+            self.global_best_score = min_score
+            c = self.get_run_color(best_run)
+            run_text = f" (Ejecución {best_run})" if self.total_runs > 1 else ""
+            self.lbl_best.setText(f"🏆 Mejor coste global: {format_number(min_score)}{run_text}")
+            self.lbl_best.setStyleSheet(f"""
+                font-size: 13px;
+                font-weight: bold;
+                color: {c};
+                padding: 3px 8px;
+                border: 1px solid {c};
+                border-radius: 4px;
+                background-color: #0c1017;
+            """)
 
         # 4. Progress bar fills smoothly as a whole across all runs
         total_work = self.total_runs * self.total_gens
@@ -341,7 +399,6 @@ class ConvergenceDialog(QDialog):
 
         final_best = best_score if best_score is not None else self.global_best_score
         clean_score = format_number(final_best) if final_best != float("inf") else "—"
-        self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}")
 
         winning_run = None
         for r in range(1, self.total_runs + 1):
@@ -357,6 +414,22 @@ class ConvergenceDialog(QDialog):
                     lbl_cost.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 11px; font-weight: bold;")
                 else:
                     lbl_cost.setText(f"Coste final: {format_number(r_best if r_best != float('inf') else '—')}")
+
+        if winning_run is not None:
+            c = self.get_run_color(winning_run)
+            run_text = f" (Ejecución {winning_run})" if self.total_runs > 1 else ""
+            self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}{run_text}")
+            self.lbl_best.setStyleSheet(f"""
+                font-size: 13px;
+                font-weight: bold;
+                color: {c};
+                padding: 3px 8px;
+                border: 1px solid {c};
+                border-radius: 4px;
+                background-color: #0c1017;
+            """)
+        else:
+            self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}")
 
         # Update legend labels to show final scores and highlight winner
         if hasattr(self, "ax"):
@@ -406,6 +479,11 @@ class ConvergenceDialog(QDialog):
             self.btn_action.setEnabled(False)
         else:
             self.accept()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "canvas"):
+            self.canvas.draw_idle()
 
     def closeEvent(self, event):
         if not self.is_finished:

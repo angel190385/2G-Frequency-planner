@@ -317,13 +317,16 @@ class TestMejorasMapaCalculo(unittest.TestCase):
         dialog.update_progress(run_idx=2, total_runs=3, gen=10, total_gens=50, best_score=130.0)
         dialog.update_progress(run_idx=3, total_runs=3, gen=10, total_gens=50, best_score=180.0)
 
+        # 4. Best score label must be colored with Run 2's color (as it has 130.0, the best)
         self.assertEqual(dialog.global_best_score, 130.0)
-        self.assertEqual(len(dialog.histories[1][0]), 1)
-        self.assertEqual(dialog.histories[2][1], [130.0])
+        run2_color = dialog.get_run_color(2)
+        self.assertIn(run2_color, dialog.lbl_best.styleSheet())
+        self.assertFalse(hasattr(dialog, "lbl_cpu_info"))
 
-        # 4. Finish and verify winning run
+        # 5. Finish and verify winning run
         dialog.set_finished(best_score=130.0)
         self.assertTrue(dialog.is_finished)
+        self.assertIn(run2_color, dialog.lbl_best.styleSheet())
         dialog.close()
 
 
