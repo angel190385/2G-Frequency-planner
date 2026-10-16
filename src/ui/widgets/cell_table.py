@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 
 from src.models.cell import Cell
+from src.models.frequency_plan import format_number
 from src.ui.styles import Colors
 
 
@@ -96,7 +97,7 @@ class CellTableWidget(QWidget):
                 cell.cell_id,
                 f"{cell.station.latitude:.6f}",
                 f"{cell.station.longitude:.6f}",
-                str(cell.bcch) if cell.bcch is not None else "",
+                format_number(cell.bcch) if cell.bcch is not None else "",
             ]
 
             for i, text in enumerate(items):
@@ -110,7 +111,7 @@ class CellTableWidget(QWidget):
 
             # TCH columns
             for j, tch in enumerate(cell.tch_list):
-                item = QTableWidgetItem(str(tch))
+                item = QTableWidgetItem(format_number(tch))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 item.setForeground(QBrush(QColor(Colors.ACCENT_BLUE)))
                 item.setData(Qt.ItemDataRole.UserRole, tch)

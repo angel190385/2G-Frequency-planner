@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QFont
 
 from src.models.cell import Cell
-from src.models.frequency_plan import PlanResult, Violation
+from src.models.frequency_plan import PlanResult, Violation, format_number
 from src.ui.styles import Colors
 
 
@@ -131,7 +131,7 @@ class SingleRunResultWidget(QWidget):
             values = [
                 (str(result.plan_id), None),
                 (f"Ejec. {result.run_id}", None),
-                (f"{result.score:.1f}", Colors.SUCCESS if result.score == best_score else None),
+                (format_number(result.score), Colors.SUCCESS if result.score == best_score else None),
                 (str(result.critical_violations),
                  Colors.DANGER if result.critical_violations > 0 else Colors.SUCCESS),
                 (str(result.total_violations),
@@ -148,8 +148,8 @@ class SingleRunResultWidget(QWidget):
                  Colors.HIGH if result.adjacent_bcch_tch > 0 else None),
                 (str(result.adjacent_tch_tch),
                  Colors.LOW if result.adjacent_tch_tch > 0 else None),
-                (f"{result.cochannel_ho_weighted:.1f}", None),
-                (f"{result.adjacent_ho_weighted:.1f}", None),
+                (format_number(result.cochannel_ho_weighted), None),
+                (format_number(result.adjacent_ho_weighted), None),
                 (str(result.same_station_cochannel),
                  Colors.DANGER if result.same_station_cochannel > 0 else None),
                 (str(result.same_station_adjacent),
@@ -207,16 +207,16 @@ class SingleRunResultWidget(QWidget):
                 continue
 
             bcch_changed = cell.bcch != assign.bcch
-            tch_before = ",".join(str(f) for f in cell.tch_list)
-            tch_after = ",".join(str(f) for f in assign.tch_list)
+            tch_before = ", ".join(format_number(f) for f in cell.tch_list)
+            tch_after = ", ".join(format_number(f) for f in assign.tch_list)
             tch_changed = tch_before != tch_after
 
             items = [
                 (assign.cell_id, None),
                 (cell.station.name if cell else "", None),
                 (cell.sector if cell else "", None),
-                (str(cell.bcch) if cell and cell.bcch else "—", None),
-                (str(assign.bcch), Colors.WARNING if bcch_changed else None),
+                (format_number(cell.bcch) if cell and cell.bcch else "—", None),
+                (format_number(assign.bcch), Colors.WARNING if bcch_changed else None),
                 ("✓ Cambiado" if bcch_changed or tch_changed else "—",
                  Colors.ACCENT if (bcch_changed or tch_changed) else Colors.TEXT_DIM),
                 (tch_before if tch_before else "—", None),
@@ -302,14 +302,77 @@ class SingleRunResultWidget(QWidget):
                     f"{v.channel_type_a}-{v.channel_type_b}",
                     v.cell_a_id,
                     v.cell_b_id,
-                    str(v.freq_a),
-                    str(v.freq_b),
-                    str(v.ho_count) if v.ho_count is not None else "—",
-                    f"{v.weighted_cost:.1f}",
+                    format_number(v.freq_a),
+                    format_number(v.freq_b),
+                    format_number(v.ho_count) if v.ho_count is not None else "—",
+                    format_number(v.weighted_cost),
                 ])
                 group_item.addChild(child)
 
             self.viol_tree.addTopLevelItem(group_item)
+
+
+import matplotlib
+matplotlib.use("QtAgg")
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.ticker import FuncFormatter
+
+
+class ConvergenceTabWidget(QWidget):
+    """Widget displaying the final convergence history curves of all runs."""
+    def __init__(self, per_run_history: dict[int, list[tuple[int, float]]], parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        fig = Figure(facecolor="#141a24")
+        canvas = FigureCanvasQTAgg(fig)
+        layout.addWidget(canvas)
+
+        num_runs = len(per_run_history)
+        if num_runs == 1:
+            rows, cols = 1, 1
+        elif num_runs == 2:
+            rows, cols = 1, 2
+        elif num_runs == 3:
+            rows, cols = 1, 3
+        elif num_runs <= 4:
+            rows, cols = 2, 2
+        elif num_runs <= 6:
+            rows, cols = 2, 3
+        else:
+            cols = 3
+            rows = (num_runs + cols - 1) // cols
+
+        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308"]
+        formatter = FuncFormatter(lambda val, _: format_number(val))
+
+        for idx, (run_idx, hist) in enumerate(sorted(per_run_history.items())):
+            ax = fig.add_subplot(rows, cols, idx + 1)
+            ax.set_facecolor("#0c1017")
+            ax.set_title(f"Ejecución {run_idx}" if num_runs > 1 else "Convergencia de la Optimización",
+                         color="#f0f4f8", fontsize=11, fontweight="bold", pad=8)
+            ax.set_xlabel("Iteración", color="#8b9bb4", fontsize=10)
+            ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10)
+            ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
+            ax.tick_params(colors="#8b9bb4", labelsize=9)
+            for spine in ax.spines.values():
+                spine.set_color("#2b384e")
+            ax.xaxis.set_major_formatter(formatter)
+            ax.yaxis.set_major_formatter(formatter)
+
+            c = colors[(run_idx - 1) % len(colors)]
+            xs = [h[0] for h in hist]
+            ys = [h[1] for h in hist]
+            ax.plot(xs, ys, color=c, linewidth=2.0, marker="o", markersize=3, label=f"Ejec. {run_idx}")
+            if ys:
+                min_y = min(ys)
+                ax.axhline(min_y, color="#eab308", linestyle=":", alpha=0.6, label=f"Mínimo: {format_number(min_y)}")
+            ax.legend(facecolor="#16213e", edgecolor="#2b384e", labelcolor="#f0f4f8", fontsize=8)
+
+        fig.tight_layout(pad=2.0)
+        canvas.draw_idle()
 
 
 class ResultComparisonWidget(QWidget):
@@ -407,13 +470,20 @@ class ResultComparisonWidget(QWidget):
                 widget.load_results(run_res, cells)
                 widget.plan_selected.connect(self.plan_selected.emit)
                 self.results_tabs.addTab(
-                    widget, f"Ejecución {run_idx} (Score: {best:.1f})"
+                    widget, f"Ejecución {run_idx} (Score: {format_number(best)})"
                 )
         else:
             best = min(r.score for r in results) if results else 0.0
-            self.lbl_status.setText(f"{len(results)} planes calculados — Mejor score: {best:.1f}")
+            self.lbl_status.setText(f"{len(results)} planes calculados — Mejor score: {format_number(best)}")
 
             widget = SingleRunResultWidget()
             widget.load_results(results, cells)
             widget.plan_selected.connect(self.plan_selected.emit)
             self.results_tabs.addTab(widget, "Resultados de Optimización")
+
+        # Convergence history tab
+        per_run_history = getattr(results, "per_run_history", {})
+        if per_run_history:
+            self.results_tabs.addTab(
+                ConvergenceTabWidget(per_run_history), "📈 Curvas de Convergencia"
+            )

@@ -223,8 +223,10 @@ def evaluate_plan(
 
         cell_a = cells.get(ca_id)
         cell_b = cells.get(cb_id)
-        same_station = (cell_a and cell_b and
-                        cell_a.station.station_id == cell_b.station.station_id)
+        same_station = bool(
+            (cell_a and cell_b and cell_a.station.station_id == cell_b.station.station_id)
+            or (relation.distance_km == 0.0)
+        )
 
         ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
 
@@ -252,7 +254,8 @@ def evaluate_plan(
                 channel_type_b=type_b
             )
 
-            cost = (weight + (100000.0 if is_hard else 0.0)) * ho_w
+            hard_penalty = 10_000_000.0 if is_hard else 0.0
+            cost = (weight + hard_penalty) * ho_w
             total_score += cost
 
             # Count by type
@@ -337,7 +340,8 @@ def evaluate_plan(
                         channel_type_b=type_b
                     )
 
-                    cost = weight + (100000.0 if is_hard else 0.0)
+                    hard_penalty = 10_000_000.0 if is_hard else 0.0
+                    cost = weight + hard_penalty
                     total_score += cost
 
                     if is_cochannel:
@@ -368,11 +372,12 @@ def evaluate_plan(
                             channel_type_b=type_b,
                             ho_count=None,
                             distance_km=0.0,
-                            weighted_cost=weight
+                            weighted_cost=cost
                         )
                         violations.append(v)
 
     # ── 3. Internal cell separation check ──────────────────────────
+    # Under no circumstances can frequencies repeat in the same cell between BCCH and TCH or among TCHs
     for cid, assign in assignments.items():
         all_freqs = [("BCCH", assign.bcch)] + [("TCH", f) for f in assign.tch_list]
         for i in range(len(all_freqs)):
@@ -380,8 +385,30 @@ def evaluate_plan(
                 type_i, freq_i = all_freqs[i]
                 type_j, freq_j = all_freqs[j]
                 diff = abs(freq_i - freq_j)
-                if diff < rules.min_separation_same_cell:
-                    penalty = rules.weight_same_station_cochannel * 2
+                if diff == 0:
+                    # Critical cochannel violation within the same cell
+                    hard_cost = 10_000_000.0
+                    total_score += hard_cost
+                    if "BCCH" in (type_i, type_j):
+                        result.cochannel_bcch_tch += 1
+                    else:
+                        result.cochannel_tch_tch += 1
+                    if collect_violations:
+                        v = Violation(
+                            cell_a_id=cid,
+                            cell_b_id=cid,
+                            freq_a=freq_i,
+                            freq_b=freq_j,
+                            violation_type="cochannel",
+                            channel_type_a=type_i,
+                            channel_type_b=type_j,
+                            ho_count=None,
+                            distance_km=0.0,
+                            weighted_cost=hard_cost
+                        )
+                        violations.append(v)
+                elif diff < rules.min_separation_same_cell:
+                    penalty = rules.weight_same_station_adjacent * 2
                     total_score += penalty
 
     # ── 4. Distance penalty for non-neighbor close cells ───────────

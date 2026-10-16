@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor, QBrush
 
 from src.models.neighbor import NeighborGraph
 from src.models.cell import Cell
+from src.models.frequency_plan import format_number
 from src.ui.styles import Colors
 
 
@@ -84,8 +85,8 @@ class NeighborTableWidget(QWidget):
                 cell_a.station.station_id if cell_a else "?",
                 rel.cell_b_id,
                 cell_b.station.station_id if cell_b else "?",
-                f"{rel.distance_km:.2f}",
-                str(rel.ho_count) if rel.ho_count is not None else "—",
+                format_number(rel.distance_km, precision=2),
+                format_number(rel.ho_count) if rel.ho_count is not None else "—",
             ]
 
             for col, text in enumerate(items_data):
@@ -126,6 +127,6 @@ class NeighborTableWidget(QWidget):
         self.lbl_with_ho.setText(f"Con HO: {with_ho}")
         self.lbl_without_ho.setText(f"Sin HO: {without_ho}")
         avg_dist = total_dist / total if total > 0 else 0
-        self.lbl_avg_dist.setText(f"Dist. media: {avg_dist:.2f} km")
+        self.lbl_avg_dist.setText(f"Dist. media: {format_number(avg_dist, precision=2)} km")
 
         self.table.setSortingEnabled(True)

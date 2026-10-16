@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor, QBrush
 
 from src.models.neighbor import NeighborGraph
 from src.models.cell import Cell
+from src.models.frequency_plan import format_number
 from src.ui.styles import Colors
 
 
@@ -93,8 +94,8 @@ class HOTableWidget(QWidget):
                 cell_a.station.station_id if cell_a else "?",
                 rel.cell_b_id,
                 cell_b.station.station_id if cell_b else "?",
-                str(ho),
-                f"{rel.distance_km:.2f}",
+                format_number(ho),
+                format_number(rel.distance_km, precision=2),
                 "Sí" if same_station else "No",
             ]
 

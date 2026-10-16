@@ -6,6 +6,25 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+def format_number(val: float | int | None, precision: int = 2) -> str:
+    """
+    Format a number cleanly:
+    - If val is None: returns ""
+    - If val is mathematically an integer (e.g. 100.0 or 100): returns "100" without decimal point/comma.
+    - If val has decimals: returns formatted with up to `precision` decimals without trailing zeros.
+    """
+    if val is None:
+        return ""
+    try:
+        fval = float(val)
+        if fval.is_integer():
+            return str(int(fval))
+        s = f"{fval:.{precision}f}".rstrip("0").rstrip(".")
+        return s
+    except (ValueError, TypeError):
+        return str(val)
+
+
 @dataclass
 class FrequencyAssignment:
     """The frequency assignment for a single cell."""
@@ -79,6 +98,9 @@ class PlanResult:
     # Detailed violations
     violations: list[Violation] = field(default_factory=list)
 
+    # Convergence history: [(iteration, best_score), ...]
+    convergence_history: list[tuple[int, float]] = field(default_factory=list)
+
     @property
     def total_cochannel(self) -> int:
         return (self.cochannel_bcch_bcch +
@@ -111,15 +133,15 @@ class PlanResult:
         """Return a summary dictionary for display."""
         return {
             "Plan": self.plan_id,
-            "Score": f"{self.score:.1f}",
+            "Score": format_number(self.score),
             "Cochan BCCH-BCCH": self.cochannel_bcch_bcch,
             "Cochan BCCH-TCH": self.cochannel_bcch_tch,
             "Cochan TCH-TCH": self.cochannel_tch_tch,
             "Adj BCCH-BCCH": self.adjacent_bcch_bcch,
             "Adj BCCH-TCH": self.adjacent_bcch_tch,
             "Adj TCH-TCH": self.adjacent_tch_tch,
-            "Cochan HO-weighted": f"{self.cochannel_ho_weighted:.1f}",
-            "Adj HO-weighted": f"{self.adjacent_ho_weighted:.1f}",
+            "Cochan HO-weighted": format_number(self.cochannel_ho_weighted),
+            "Adj HO-weighted": format_number(self.adjacent_ho_weighted),
             "Same-station Cochan": self.same_station_cochannel,
             "Same-station Adj": self.same_station_adjacent,
             "Total Violations": self.total_violations,
@@ -131,7 +153,13 @@ class OptimizationResultList(list):
     """
     A list of PlanResult objects that supports custom attributes like per_run mapping.
     """
-    def __init__(self, iterable=(), per_run: Optional[dict[int, list[PlanResult]]] = None):
+    def __init__(
+        self,
+        iterable=(),
+        per_run: Optional[dict[int, list[PlanResult]]] = None,
+        per_run_history: Optional[dict[int, list[tuple[int, float]]]] = None
+    ):
         super().__init__(iterable)
         self.per_run: dict[int, list[PlanResult]] = per_run or {}
+        self.per_run_history: dict[int, list[tuple[int, float]]] = per_run_history or {}
 

@@ -18,7 +18,7 @@ from PyQt6.QtCore import QMarginsF
 
 from src.models.cell import Cell
 from src.models.neighbor import NeighborGraph
-from src.models.frequency_plan import PlanResult, FrequencyAssignment
+from src.models.frequency_plan import PlanResult, FrequencyAssignment, format_number
 from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
 from src.engine.cost_function import evaluate_plan
 
@@ -194,7 +194,7 @@ def _build_report_html(
         return f"<tr>{''.join(tds)}</tr>"
 
     comparison_rows = [
-        metric_row("Score Global (Coste)", f"{baseline.score:.1f}", lambda s: f"{s.score:.1f}"),
+        metric_row("Score Global (Coste)", format_number(baseline.score), lambda s: format_number(s.score)),
         metric_row("Violaciones Críticas (BCCH-BCCH)", baseline.critical_violations, lambda s: s.critical_violations),
         metric_row("Total Violaciones (Cocanal + Adj)", baseline.total_violations, lambda s: s.total_violations),
         metric_row("Cocanalidad BCCH-BCCH", baseline.cochannel_bcch_bcch, lambda s: s.cochannel_bcch_bcch),
@@ -203,8 +203,8 @@ def _build_report_html(
         metric_row("Adyacencia BCCH-BCCH", baseline.adjacent_bcch_bcch, lambda s: s.adjacent_bcch_bcch),
         metric_row("Adyacencia BCCH-TCH", baseline.adjacent_bcch_tch, lambda s: s.adjacent_bcch_tch),
         metric_row("Adyacencia TCH-TCH", baseline.adjacent_tch_tch, lambda s: s.adjacent_tch_tch),
-        metric_row("Cocanalidad Ponderada por HO", f"{baseline.cochannel_ho_weighted:.1f}", lambda s: f"{s.cochannel_ho_weighted:.1f}"),
-        metric_row("Adyacencia Ponderada por HO", f"{baseline.adjacent_ho_weighted:.1f}", lambda s: f"{s.adjacent_ho_weighted:.1f}"),
+        metric_row("Cocanalidad Ponderada por HO", format_number(baseline.cochannel_ho_weighted), lambda s: format_number(s.cochannel_ho_weighted)),
+        metric_row("Adyacencia Ponderada por HO", format_number(baseline.adjacent_ho_weighted), lambda s: format_number(s.adjacent_ho_weighted)),
         metric_row("Misma Estación (Cocanal + Adj)", baseline.same_station_cochannel + baseline.same_station_adjacent,
                    lambda s: s.same_station_cochannel + s.same_station_adjacent),
     ]
@@ -272,11 +272,11 @@ def _build_report_html(
                     <td style='padding:4px;'>{kind} ({both})</td>
                     <td style='padding:4px; font-weight:bold;'>{safe_cell_a}</td>
                     <td style='padding:4px; font-weight:bold;'>{safe_cell_b}</td>
-                    <td style='padding:4px; text-align:center;'>{v.freq_a}</td>
-                    <td style='padding:4px; text-align:center;'>{v.freq_b}</td>
+                    <td style='padding:4px; text-align:center;'>{format_number(v.freq_a)}</td>
+                    <td style='padding:4px; text-align:center;'>{format_number(v.freq_b)}</td>
                     <td style='padding:4px; text-align:center;'>{ho_str}</td>
                     <td style='padding:4px; text-align:center;'>{dist_str}</td>
-                    <td style='padding:4px; text-align:center; font-weight:bold;'>{v.weighted_cost:.1f}</td>
+                    <td style='padding:4px; text-align:center; font-weight:bold;'>{format_number(v.weighted_cost)}</td>
                 </tr>
             """)
     else:

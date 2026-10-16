@@ -14,9 +14,10 @@ from PyQt6.QtGui import QAction, QColor, QBrush
 import os
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborGraph
-from src.models.frequency_plan import PlanResult
+from src.models.frequency_plan import PlanResult, format_number
 from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
 from src.engine.optimizer import FrequencyOptimizer
+from src.engine.hardware import get_hardware_profile
 from src.io.data_loader import (
     load_cells, load_neighbors, load_handovers, export_results
 )
@@ -30,6 +31,7 @@ from src.ui.widgets.map_widget import MapWidget
 from src.ui.dialogs.import_dialog import ImportDialog
 from src.ui.dialogs.rules_dialog import RulesDialog
 from src.ui.dialogs.range_adaptation_dialog import RangeAdaptationDialog
+from src.ui.dialogs.convergence_dialog import ConvergenceDialog
 
 
 class OptimizerThread(QThread):
@@ -38,11 +40,12 @@ class OptimizerThread(QThread):
     finished = pyqtSignal(list)  # list[PlanResult]
     error = pyqtSignal(str)
 
-    def __init__(self, cells, neighbor_graph, rules):
+    def __init__(self, cells, neighbor_graph, rules, max_workers: int | None = None):
         super().__init__()
         self.cells = cells
         self.neighbor_graph = neighbor_graph
         self.rules = rules
+        self.max_workers = max_workers
         self.optimizer = None
 
     def run(self):
@@ -51,7 +54,8 @@ class OptimizerThread(QThread):
                 cells=self.cells,
                 neighbor_graph=self.neighbor_graph,
                 rules=self.rules,
-                progress_callback=self._on_progress
+                progress_callback=self._on_progress,
+                max_workers=self.max_workers
             )
             results = self.optimizer.optimize()
             self.finished.emit(results)
@@ -316,16 +320,24 @@ class MainWindow(QMainWindow):
         self.spin_calc_num_runs.valueChanged.connect(self._on_calc_num_runs_changed)
         cg_layout.addWidget(self.spin_calc_num_runs, 2, 1)
 
+        # Multi-core hardware profiling
+        hw = get_hardware_profile()
+        cg_layout.addWidget(QLabel("Procesos CPU paralelos:"), 3, 0)
+        self.spin_calc_workers = QSpinBox()
+        self.spin_calc_workers.setRange(1, max(32, hw.cpu_count))
+        self.spin_calc_workers.setValue(hw.recommended_workers)
+        self.spin_calc_workers.setToolTip("Aprovecha el 100% de la CPU distribuyendo el cálculo en todos los núcleos.")
+        cg_layout.addWidget(self.spin_calc_workers, 3, 1)
+
+        self.lbl_hw_info = QLabel(hw.summary_detailed)
+        self.lbl_hw_info.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 11px; padding-top: 4px;")
+        cg_layout.addWidget(self.lbl_hw_info, 4, 0, 1, 2)
+
         right_layout.addWidget(calc_group)
 
         right_layout.addStretch()
 
-        # Progress
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setTextVisible(True)
-        right_layout.addWidget(self.progress_bar)
-
+        # Progress status label
         self.lbl_progress = QLabel("")
         self.lbl_progress.setObjectName("label_subtitle")
         self.lbl_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -690,14 +702,23 @@ class MainWindow(QMainWindow):
         # Prepare: we pass ALL cells (for context) but only some have variables
         self.btn_calculate.setEnabled(False)
         self.btn_cancel.setVisible(True)
-        self.progress_bar.setVisible(True)
-        total_steps = self.rules.num_generations * max(1, self.rules.num_runs)
-        self.progress_bar.setRange(0, total_steps)
-        self.progress_bar.setValue(0)
-        self.lbl_progress.setText(f"Iniciando {self.rules.num_runs} ejecuciones...")
+        self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")
+        self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
+
+        # Open real-time convergence dialog
+        self.convergence_dialog = ConvergenceDialog(
+            total_runs=self.rules.num_runs,
+            total_gens=self.rules.num_generations,
+            parent=self
+        )
+        self.convergence_dialog.cancelled.connect(self._cancel_calculation)
+        self.convergence_dialog.show()
+
+        workers = getattr(self, "spin_calc_workers", None)
+        max_workers = workers.value() if workers else None
 
         self._optimizer_thread = OptimizerThread(
-            self.cells, self.neighbor_graph, self.rules
+            self.cells, self.neighbor_graph, self.rules, max_workers=max_workers
         )
         self._optimizer_thread.progress.connect(self._on_optimization_progress)
         self._optimizer_thread.finished.connect(self._on_optimization_finished)
@@ -711,28 +732,27 @@ class MainWindow(QMainWindow):
             self.lbl_progress.setText("Cancelando...")
 
     def _on_optimization_progress(self, run_idx, total_runs, gen, total_gens, best_score):
-        """Update progress bar and label for multi-run execution."""
-        current_step = (run_idx - 1) * total_gens + gen
-        self.progress_bar.setValue(current_step)
-        self.lbl_progress.setText(
-            f"Ejecución {run_idx}/{total_runs} — Generación {gen}/{total_gens} — "
-            f"Mejor score: {best_score:.1f}"
-        )
+        """Forward progress directly to the real-time convergence dialog without jittering main window."""
+        if hasattr(self, "convergence_dialog") and self.convergence_dialog:
+            self.convergence_dialog.update_progress(run_idx, total_runs, gen, total_gens, best_score)
 
     def _on_optimization_finished(self, results):
         """Handle optimization completion."""
         self.results = results
         self.btn_calculate.setEnabled(True)
         self.btn_cancel.setVisible(False)
-        self.progress_bar.setVisible(False)
 
         n = len(results)
-        best = min(r.score for r in results) if results else 0
+        best = min((r.score for r in results), default=0)
+        clean_best = format_number(best)
         self.lbl_progress.setText(
             f"✅ Completado — {n} planes generados — "
-            f"Mejor score: {best:.1f}"
+            f"Mejor score: {clean_best}"
         )
         self.lbl_progress.setStyleSheet(f"color: {Colors.SUCCESS};")
+
+        if hasattr(self, "convergence_dialog") and self.convergence_dialog:
+            self.convergence_dialog.set_finished(best)
 
         # Show results
         self.result_widget.load_results(results, self.cells)
@@ -740,16 +760,18 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(3)  # Switch to Results tab
 
         self.status_label.setText(
-            f"Optimización completada: {n} planes, mejor score: {best:.1f}"
+            f"Optimización completada: {n} planes, mejor score: {clean_best}"
         )
 
     def _on_optimization_error(self, error_msg):
         """Handle optimization error."""
         self.btn_calculate.setEnabled(True)
         self.btn_cancel.setVisible(False)
-        self.progress_bar.setVisible(False)
         self.lbl_progress.setText(f"❌ Error: {error_msg}")
         self.lbl_progress.setStyleSheet(f"color: {Colors.DANGER};")
+
+        if hasattr(self, "convergence_dialog") and self.convergence_dialog:
+            self.convergence_dialog.close()
 
         QMessageBox.critical(
             self, "Error de optimización",
