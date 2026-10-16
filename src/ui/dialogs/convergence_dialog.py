@@ -224,52 +224,54 @@ class ConvergenceDialog(QDialog):
         layout.addLayout(footer_layout)
 
     def _init_plots(self):
-        """Initialize Matplotlib subplots based on total_runs."""
+        """Initialize a single large comparison Matplotlib plot where each execution is a distinct line."""
         self.figure.clear()
 
-        # Grid calculation
-        if self.total_runs == 1:
-            rows, cols = 1, 1
-        elif self.total_runs == 2:
-            rows, cols = 1, 2
-        elif self.total_runs == 3:
-            rows, cols = 1, 3
-        elif self.total_runs <= 4:
-            rows, cols = 2, 2
-        elif self.total_runs <= 6:
-            rows, cols = 2, 3
-        else:
-            cols = 3
-            rows = (self.total_runs + cols - 1) // cols
+        self.ax = self.figure.add_subplot(1, 1, 1)
+        self.ax.set_facecolor("#0c1017")
+        self.axes = [self.ax]
 
-        self.axes = []
-        self.lines = {}
+        title_text = "Comparación de Convergencia por Ejecución (Iteración vs Coste)" if self.total_runs > 1 else "Convergencia de la Optimización (Iteración vs Coste)"
+        self.ax.set_title(title_text, color="#f0f4f8", fontsize=12, fontweight="bold", pad=10)
+        self.ax.set_xlabel("Iteración / Generación", color="#8b9bb4", fontsize=10, labelpad=6)
+        self.ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10, labelpad=6)
+        self.ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
+        self.ax.tick_params(colors="#8b9bb4", labelsize=9)
 
-        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308"]
+        for spine in self.ax.spines.values():
+            spine.set_color("#2b384e")
 
         formatter = FuncFormatter(_axis_formatter)
+        self.ax.xaxis.set_major_formatter(formatter)
+        self.ax.yaxis.set_major_formatter(formatter)
+
+        self.lines = {}
+        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308", "#ec4899", "#6366f1"]
 
         for r in range(1, self.total_runs + 1):
-            ax = self.figure.add_subplot(rows, cols, r)
-            ax.set_facecolor("#0c1017")
-            ax.set_title(f"Ejecución {r}" if self.total_runs > 1 else "Convergencia de la Optimización",
-                         color="#f0f4f8", fontsize=11, fontweight="bold", pad=8)
-            ax.set_xlabel("Iteración", color="#8b9bb4", fontsize=10)
-            ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10)
-            ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
-            ax.tick_params(colors="#8b9bb4", labelsize=9)
-
-            for spine in ax.spines.values():
-                spine.set_color("#2b384e")
-
-            ax.xaxis.set_major_formatter(formatter)
-            ax.yaxis.set_major_formatter(formatter)
-
             c = colors[(r - 1) % len(colors)]
-            line, = ax.plot([], [], color=c, linewidth=2.0, marker="o", markersize=3,
-                            markerfacecolor=c, markeredgecolor=c, label=f"Ejec. {r}")
+            label = f"Ejecución {r}"
+            line, = self.ax.plot(
+                [], [],
+                color=c,
+                linewidth=2.2,
+                marker="o",
+                markersize=3.5,
+                markerfacecolor=c,
+                markeredgecolor=c,
+                label=label,
+                alpha=0.9
+            )
             self.lines[r] = line
-            self.axes.append(ax)
+
+        self.legend = self.ax.legend(
+            facecolor="#141a24",
+            edgecolor="#2b384e",
+            labelcolor="#f0f4f8",
+            fontsize=9,
+            loc="upper right",
+            framealpha=0.85
+        )
 
         self.figure.tight_layout(pad=2.0)
         self.canvas.draw_idle()
@@ -299,9 +301,8 @@ class ConvergenceDialog(QDialog):
         if run_idx in self.lines:
             line = self.lines[run_idx]
             line.set_data(x_vals, y_vals)
-            ax = self.axes[run_idx - 1]
-            ax.relim()
-            ax.autoscale_view()
+            self.ax.relim()
+            self.ax.autoscale_view()
 
         # 2. Track current gen and best score per run
         self.current_gens[run_idx] = max(self.current_gens.get(run_idx, 0), gen)
@@ -342,16 +343,45 @@ class ConvergenceDialog(QDialog):
         clean_score = format_number(final_best) if final_best != float("inf") else "—"
         self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}")
 
+        winning_run = None
         for r in range(1, self.total_runs + 1):
+            r_best = self.run_best_scores.get(r, float("inf"))
+            if r_best == final_best and winning_run is None and r_best != float("inf"):
+                winning_run = r
+
             if r in self.run_row_labels:
                 lbl_iter, lbl_cost = self.run_row_labels[r]
                 lbl_iter.setText(f"Iteración {self.total_gens}/{self.total_gens} (100%) — Finalizada")
-                r_best = self.run_best_scores.get(r, float("inf"))
-                if r_best == final_best and r_best != float("inf"):
+                if r == winning_run:
                     lbl_cost.setText(f"Coste final: {format_number(r_best)} ★ (Mejor)")
                     lbl_cost.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 11px; font-weight: bold;")
                 else:
                     lbl_cost.setText(f"Coste final: {format_number(r_best if r_best != float('inf') else '—')}")
+
+        # Update legend labels to show final scores and highlight winner
+        if hasattr(self, "ax"):
+            for r, line in self.lines.items():
+                r_best = self.run_best_scores.get(r, float("inf"))
+                score_str = format_number(r_best) if r_best != float("inf") else "—"
+                if r == winning_run:
+                    line.set_label(f"Ejecución {r}: {score_str} ★ (Mejor)")
+                    line.set_linewidth(3.2)
+                    line.set_zorder(10)
+                else:
+                    line.set_label(f"Ejecución {r}: {score_str}")
+                    line.set_linewidth(1.8)
+                    line.set_alpha(0.7)
+
+            self.ax.legend(
+                facecolor="#141a24",
+                edgecolor="#2b384e",
+                labelcolor="#f0f4f8",
+                fontsize=9,
+                loc="upper right",
+                framealpha=0.9
+            )
+            self.ax.relim()
+            self.ax.autoscale_view()
 
         self.btn_action.setText("✓ Ver Resultados y Cerrar")
         self.btn_action.setStyleSheet(f"""
@@ -366,10 +396,6 @@ class ConvergenceDialog(QDialog):
             QPushButton:hover {{ background-color: #00b894; }}
         """)
 
-        # Redraw final plots with proper bounds
-        for ax in self.axes:
-            ax.relim()
-            ax.autoscale_view()
         self.canvas.draw_idle()
 
     def _on_action_clicked(self):

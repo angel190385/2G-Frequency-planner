@@ -189,6 +189,38 @@ class TestMejorasMapaCalculo(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def test_convergence_dialog_single_comparison_plot(self):
+        """Verify that ConvergenceDialog uses a single large plot with all execution curves."""
+        from PyQt6.QtWidgets import QApplication
+        from src.ui.dialogs.convergence_dialog import ConvergenceDialog
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        dialog = ConvergenceDialog(total_runs=3, total_gens=50)
+
+        # 1. Must have a single main axes
+        self.assertIsNotNone(dialog.ax)
+        self.assertEqual(len(dialog.axes), 1)
+
+        # 2. Must have 3 line series in lines dict
+        self.assertEqual(len(dialog.lines), 3)
+        self.assertIn(1, dialog.lines)
+        self.assertIn(2, dialog.lines)
+        self.assertIn(3, dialog.lines)
+
+        # 3. Simulate progress updates
+        dialog.update_progress(run_idx=1, total_runs=3, gen=10, total_gens=50, best_score=150.0)
+        dialog.update_progress(run_idx=2, total_runs=3, gen=10, total_gens=50, best_score=130.0)
+        dialog.update_progress(run_idx=3, total_runs=3, gen=10, total_gens=50, best_score=180.0)
+
+        self.assertEqual(dialog.global_best_score, 130.0)
+        self.assertEqual(len(dialog.histories[1][0]), 1)
+        self.assertEqual(dialog.histories[2][1], [130.0])
+
+        # 4. Finish and verify winning run
+        dialog.set_finished(best_score=130.0)
+        self.assertTrue(dialog.is_finished)
+        dialog.close()
+
 
 if __name__ == '__main__':
     unittest.main()
