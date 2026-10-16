@@ -12,7 +12,7 @@ from src.models.cell import Cell
 from src.models.neighbor import NeighborGraph
 from src.models.frequency_plan import FrequencyAssignment, PlanResult, Violation
 from src.engine.constraints import FrequencyRules
-from src.engine.cost_function import _ho_weight, _distance_penalty, precompute_close_cell_pairs
+from src.engine.cost_function import _ho_weight, _distance_factor, _distance_penalty, precompute_close_cell_pairs
 
 HARD_PENALTY: float = 10_000_000.0
 
@@ -108,12 +108,16 @@ class FastPlanEvaluator:
                 or (relation.distance_km == 0.0)
             )
 
+            decay = getattr(rules, "distance_decay", 0.3)
+            neighbor_mult = getattr(rules, "weight_neighbor_factor", 1.3)
+            dist_f = _distance_factor(relation.distance_km, decay=decay)
             ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
+            rel_mult = 2.0 if same_st else (dist_f * neighbor_mult * ho_w)
 
             rel_a_list.append(idx_a)
             rel_b_list.append(idx_b)
             same_st_list.append(same_st)
-            ho_w_list.append(ho_w)
+            ho_w_list.append(rel_mult)
             dist_list.append(relation.distance_km)
             ho_count_list.append(relation.ho_count if relation.ho_count is not None else -1)
 

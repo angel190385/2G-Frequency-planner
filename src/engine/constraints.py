@@ -11,31 +11,31 @@ STATISTICAL_MODELS: dict[str, dict] = {
         "id": "logarithmic",
         "name": "Logarítmico (Compresión de Varianza - Estándar)",
         "short_name": "Logarítmico",
-        "formula": "w = log2(1 + HO) si HO > 0 else 0.1",
-        "description": "Aplica una compresión sublineal a los traspasos. Amortigua valores extremos de tráfico sin ignorarlos, protegiendo tanto rutas críticas como vecindades secundarias sin que las grandes arterias monopolicen la función de coste.",
+        "formula": "w = 1.0 + 0.5 * log2(1 + HO) si HO > 0 else 1.0",
+        "description": "Aplica una compresión sublineal a los traspasos con base neutra 1.0. Amortigua valores extremos sin ignorar relaciones sin telemetría HO ni dejar que las arterias monopolicen la función de coste.",
         "usage": "Recomendado como estándar para la mayoría de redes GSM urbanas y mixtas.",
     },
     "linear": {
         "id": "linear",
         "name": "Lineal Normalizado (Proporcional a Carga)",
         "short_name": "Lineal",
-        "formula": "w = 1.0 + (HO / media_HO) * 1.5",
-        "description": "Escala directamente proporcional al volumen de traspasos relativo a la media de la red. Penaliza en razón directa al tráfico observado sin compresión.",
+        "formula": "w = 1.0 + (HO / media_HO) * 0.75 si HO > 0 else 1.0",
+        "description": "Escala proporcionalmente al volumen de traspasos relativo a la media de la red, manteniendo base 1.0 para celdas sin estadísticas.",
         "usage": "Recomendado cuando el tráfico es homogéneo y se desea proteger los handovers en proporción exacta al volumen.",
     },
     "sigmoid": {
         "id": "sigmoid",
         "name": "Sigmoide / Curva S (Sensibilidad por Umbral Crítico)",
         "short_name": "Sigmoide",
-        "formula": "w = 0.2 + 3.8 / (1 + e^(-k * (HO - mediana_HO)))",
-        "description": "Función logística centrada en la mediana. Trata los handovers bajos de forma suave y tolerante, pero escala rápidamente al superar la mediana penalizando severamente las relaciones con alto riesgo de caída de llamada.",
+        "formula": "w = 1.0 + 1.5 / (1 + e^(-k * (HO - mediana_HO))) si HO > 0 else 1.0",
+        "description": "Función logística centrada en la mediana. Base 1.0 para bajo tráfico o sin datos, escalando suavemente al superar la mediana de la red.",
         "usage": "Ideal para redes densas donde relaciones que superan el umbral medio tienen alto riesgo de corte de llamada.",
     },
     "exponential": {
         "id": "exponential",
         "name": "Exponencial / Pareto 80-20 (Prioridad a Hotspots)",
         "short_name": "Exponencial",
-        "formula": "w = 1.0 + 5.0 * (HO / max_HO)^2",
+        "formula": "w = 1.0 + 2.0 * (HO / max_HO)^2 si HO > 0 else 1.0",
         "description": "Aplica una ley cuadrática que concentra la máxima penalización en el top 10-20% de relaciones más cargadas de la red (principio de Pareto), flexibilizando restricciones en enlaces secundarios.",
         "usage": "Recomendado en redes con hotspots o ejes de tráfico prioritarios que no admiten degradación.",
     },
@@ -95,10 +95,12 @@ class FrequencyRules:
     # ── Statistical Model for Handover Weights ────────────────────────
     ho_statistical_model: str = "logarithmic"
 
-    # ── Distance penalty ──────────────────────────────────────────────
+    # ── Distance & Spatial Decoupling ──────────────────────────────────
+    distance_decay: float = 0.3             # Spatial decay rate per km: 1 / (1 + decay * d)
+    weight_neighbor_factor: float = 1.3     # Multiplier for confirmed neighbor graph relations
     enable_distance_penalty: bool = True
-    distance_threshold_km: float = 5.0
-    weight_distance: float = 20.0
+    distance_threshold_km: float = 6.0
+    weight_distance: float = 25.0
 
     # ── Algorithm parameters ──────────────────────────────────────────
     population_size: int = 200

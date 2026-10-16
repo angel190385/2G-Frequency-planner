@@ -46,6 +46,7 @@ class Violation:
     ho_count: Optional[int] = None
     distance_km: float = 0.0
     weighted_cost: float = 0.0
+    is_inherited: bool = False  # True if both frequencies already existed in baseline network
 
     @property
     def severity(self) -> str:
@@ -78,6 +79,10 @@ class PlanResult:
 
     # Aggregate score (lower = better)
     score: float = 0.0
+
+    # Cost breakdown: inherited (already present in baseline) vs new assignments
+    inherited_cost: float = 0.0
+    new_assignment_cost: float = 0.0
 
     # Violation counts
     cochannel_bcch_bcch: int = 0
@@ -134,6 +139,8 @@ class PlanResult:
         return {
             "Plan": self.plan_id,
             "Score": format_number(self.score),
+            "Inherited Cost": format_number(self.inherited_cost),
+            "New Cost": format_number(self.new_assignment_cost),
             "Cochan BCCH-BCCH": self.cochannel_bcch_bcch,
             "Cochan BCCH-TCH": self.cochannel_bcch_tch,
             "Cochan TCH-TCH": self.cochannel_tch_tch,

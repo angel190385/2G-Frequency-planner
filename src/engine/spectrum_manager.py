@@ -208,7 +208,8 @@ def apply_spectrum_shift_to_cells(
     neighbor_graph: NeighborGraph,
     rules: FrequencyRules,
     analysis: SpectrumShiftAnalysis,
-    mode: str = "improve_with_new"
+    mode: str = "improve_with_new",
+    include_all_cell_tchs: bool = False
 ) -> int:
     """
     Update rules to the target spectrum range and configure cell recalculation flags.
@@ -217,6 +218,10 @@ def apply_spectrum_shift_to_cells(
     - 'disappeared_only': flags only channels that disappear for recalculation.
     - 'improve_with_new': flags channels that disappear AND additionally flags conflicting
       neighbor channels to allow the optimizer to leverage the newly added spectrum.
+
+    If include_all_cell_tchs is True:
+    Any cell that has at least one TCH affected/out-of-range will have ALL of its TCH
+    slots included for recalculation, enabling complete transceiver re-tuning.
 
     Returns the total number of variables marked for optimization.
     """
@@ -236,7 +241,12 @@ def apply_spectrum_shift_to_cells(
             continue
         if info["bcch_affected"]:
             cell.recalculate_bcch = True
-        cell.tch_indices_to_recalculate = list(info["tch_affected_indices"])
+
+        if include_all_cell_tchs and info["tch_affected_indices"]:
+            # User selected to include all TCHs of any cell with an affected TCH
+            cell.tch_indices_to_recalculate = list(range(len(cell.tch_list)))
+        else:
+            cell.tch_indices_to_recalculate = list(info["tch_affected_indices"])
 
     # If mode is 'improve_with_new' and we have new spectrum or remaining conflicts,
     # expand recalculation to cells involved in neighbor violations so the new spectrum

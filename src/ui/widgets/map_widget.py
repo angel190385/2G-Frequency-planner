@@ -9,7 +9,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QGroupBox, QSplitter
+    QPushButton, QGroupBox, QSplitter, QCheckBox
 )
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -48,41 +48,75 @@ class MapWidget(QWidget):
 
         # Controls header
         ctrl_box = QGroupBox("🗺️ Filtros y Controles del Mapa")
-        ctrl_layout = QHBoxLayout(ctrl_box)
-        ctrl_layout.setContentsMargins(8, 6, 8, 6)
-        ctrl_layout.setSpacing(12)
+        ctrl_main_layout = QVBoxLayout(ctrl_box)
+        ctrl_main_layout.setContentsMargins(8, 6, 8, 6)
+        ctrl_main_layout.setSpacing(6)
+
+        # Row 1: Primary Selectors
+        row1 = QHBoxLayout()
+        row1.setSpacing(10)
 
         # Plan Selector
-        ctrl_layout.addWidget(QLabel("Plan:"))
+        row1.addWidget(QLabel("Plan:"))
         self.combo_plan = QComboBox()
         self.combo_plan.addItem("Original (Antes de calcular)", -1)
         self.combo_plan.currentIndexChanged.connect(self._on_filter_changed)
-        ctrl_layout.addWidget(self.combo_plan)
+        row1.addWidget(self.combo_plan)
 
         # Channel / ARFCN Filter
-        ctrl_layout.addWidget(QLabel("Filtrar Canal:"))
+        row1.addWidget(QLabel("Canal:"))
         self.combo_freq = QComboBox()
-        self.combo_freq.addItem("Todos los canales", -1)
+        self.combo_freq.addItem("Todos", -1)
         self.combo_freq.currentIndexChanged.connect(self._on_filter_changed)
-        ctrl_layout.addWidget(self.combo_freq)
+        row1.addWidget(self.combo_freq)
+
+        # Cell Selector (Requirement 1)
+        row1.addWidget(QLabel("Celda:"))
+        self.combo_cell = QComboBox()
+        self.combo_cell.addItem("🔍 Todas las celdas", "")
+        self.combo_cell.currentIndexChanged.connect(self._on_cell_selected)
+        row1.addWidget(self.combo_cell)
 
         # Conflict Overlay Selector
-        ctrl_layout.addWidget(QLabel("Mostrar Coincidencias:"))
+        row1.addWidget(QLabel("Coincidencias:"))
         self.combo_conflicts = QComboBox()
-        self.combo_conflicts.addItem("Todas las coincidencias", "all")
+        self.combo_conflicts.addItem("Todas", "all")
         self.combo_conflicts.addItem("Solo Cocanalidades (Rojo)", "cochannel")
         self.combo_conflicts.addItem("Solo Adyacencias (Naranja)", "adjacent")
-        self.combo_conflicts.addItem("Ocultar líneas de conflicto", "none")
+        self.combo_conflicts.addItem("Ocultar líneas", "none")
         self.combo_conflicts.currentIndexChanged.connect(self._on_filter_changed)
-        ctrl_layout.addWidget(self.combo_conflicts)
+        row1.addWidget(self.combo_conflicts)
 
-        ctrl_layout.addStretch()
+        ctrl_main_layout.addLayout(row1)
+
+        # Row 2: Dynamic Viewport & Layer Filters
+        row2 = QHBoxLayout()
+        row2.setSpacing(14)
+
+        # Viewport Filtering Toggle (Requirement 1)
+        self.chk_viewport_filter = QCheckBox("👁️ Filtrar líneas a la vista actual")
+        self.chk_viewport_filter.setChecked(True)
+        self.chk_viewport_filter.setToolTip(
+            "Oculta automáticamente las líneas de conflicto que conectan con celdas fuera del encuadre actual del mapa"
+        )
+        self.chk_viewport_filter.toggled.connect(self._on_viewport_filter_toggled)
+        row2.addWidget(self.chk_viewport_filter)
+
+        # Only Modified Cells Toggle (Requirement 1)
+        self.chk_only_modified = QCheckBox("🔄 Solo celdas modificadas")
+        self.chk_only_modified.setChecked(False)
+        self.chk_only_modified.setToolTip("Muestra únicamente las celdas cuyas frecuencias han sido modificadas por el optimizador")
+        self.chk_only_modified.toggled.connect(self._on_filter_changed)
+        row2.addWidget(self.chk_only_modified)
+
+        row2.addStretch()
 
         # Reset Map button
         btn_center = QPushButton("🎯 Centrar Mapa")
         btn_center.clicked.connect(self._reset_map_view)
-        ctrl_layout.addWidget(btn_center)
+        row2.addWidget(btn_center)
 
+        ctrl_main_layout.addLayout(row2)
         layout.addWidget(ctrl_box)
 
         # WebEngine Map View with hardened security settings
@@ -137,9 +171,24 @@ class MapWidget(QWidget):
             color: #1a1a2e;
             font-family: 'Segoe UI', Arial, sans-serif;
             font-size: 12px;
+            min-width: 210px;
         }}
-        .sector-popup b {{
+        .sector-popup h3 {{
+            margin: 2px 0 6px 0;
+            font-size: 14px;
             color: #0f3460;
+        }}
+        .badge-modified {{
+            display: inline-block;
+            background: linear-gradient(135deg, #ff007f, #9b59b6);
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(255, 0, 127, 0.3);
         }}
         .conflict-tooltip {{
             background: #16213e;
@@ -164,6 +213,10 @@ class MapWidget(QWidget):
         var sectorsLayer = L.layerGroup().addTo(map);
         var conflictsLayer = L.layerGroup().addTo(map);
         window.totalCellsCount = 0;
+        var cellLayers = {{}};
+        var allConflicts = [];
+        var viewportFiltering = true;
+        var focusedCellId = null;
 
         function escapeHtml(str) {{
             if (str === null || str === undefined) return '';
@@ -205,23 +258,55 @@ class MapWidget(QWidget):
             }}
             points.push([lat, lon]);
 
+            var isMod = !!cellData.is_modified;
             var polygon = L.polygon(points, {{
-                color: color,
+                color: isMod ? '#ff007f' : color,
                 fillColor: color,
-                fillOpacity: 0.5,
-                weight: 2
+                fillOpacity: isMod ? 0.7 : 0.5,
+                weight: isMod ? 3.5 : 2,
+                dashArray: isMod ? '4, 4' : null
             }});
 
-            var popupContent = '<div class="sector-popup">' +
-                '<h3>📡 ' + escapeHtml(cellData.cell_id) + '</h3>' +
+            var popupContent = '<div class="sector-popup">';
+            if (isMod) {{
+                popupContent += '<div class="badge-modified">✨ MODIFICADA POR OPTIMIZADOR</div><br/>';
+            }}
+            popupContent += '<h3>📡 ' + escapeHtml(cellData.cell_id) + '</h3>' +
                 '<b>Estación:</b> ' + escapeHtml(cellData.station_name) + '<br/>' +
-                '<b>Sector:</b> ' + escapeHtml(cellData.sector) + ' | <b>Azimut:</b> ' + cellData.azimuth + '°<br/>' +
-                '<b>BCCH:</b> <span style="font-weight:bold;color:#00b894;">' + (cellData.bcch || '—') + '</span><br/>' +
-                '<b>TCH:</b> ' + (cellData.tch_list ? cellData.tch_list.join(', ') : '—') +
-                '</div>';
+                '<b>Sector:</b> ' + escapeHtml(cellData.sector) + ' | <b>Azimut:</b> ' + cellData.azimuth + '°<br/>';
+
+            if (isMod) {{
+                popupContent += '<div style="margin-top:6px;padding:6px;background:#f4f5f8;border-left:3px solid #ff007f;border-radius:3px;">' +
+                    '<b>BCCH:</b> ' + (cellData.orig_bcch || '—') + ' ➔ <b style="color:#ff007f;font-size:13px;">' + (cellData.bcch || '—') + '</b><br/>' +
+                    '<b>TCH:</b> ' + (cellData.orig_tch ? cellData.orig_tch.join(', ') : '—') + ' ➔ <b style="color:#008b8b;font-size:13px;">' + (cellData.tch_list ? cellData.tch_list.join(', ') : '—') + '</b>' +
+                    '</div>';
+            }} else {{
+                popupContent += '<b>BCCH:</b> <span style="font-weight:bold;color:#00b894;">' + (cellData.bcch || '—') + '</span><br/>' +
+                    '<b>TCH:</b> ' + (cellData.tch_list ? cellData.tch_list.join(', ') : '—');
+            }}
+            popupContent += '</div>';
 
             polygon.bindPopup(popupContent);
             sectorsLayer.addLayer(polygon);
+
+            if (isMod) {{
+                var stationMarker = L.circleMarker([lat, lon], {{
+                    radius: 5,
+                    color: '#ffffff',
+                    fillColor: '#ff007f',
+                    fillOpacity: 1.0,
+                    weight: 2
+                }});
+                stationMarker.bindPopup(popupContent);
+                sectorsLayer.addLayer(stationMarker);
+            }}
+
+            cellLayers[cellData.cell_id] = {{
+                polygon: polygon,
+                lat: lat,
+                lon: lon,
+                data: cellData
+            }};
         }}
 
         // Draw line connecting conflict cells
@@ -231,7 +316,7 @@ class MapWidget(QWidget):
             var line = L.polyline([[lat1, lon1], [lat2, lon2]], {{
                 color: color,
                 weight: isCo ? 3 : 2,
-                opacity: 0.8,
+                opacity: 0.85,
                 dashArray: isCo ? null : '6, 6'
             }});
 
@@ -239,9 +324,64 @@ class MapWidget(QWidget):
             conflictsLayer.addLayer(line);
         }}
 
+        function renderConflicts() {{
+            conflictsLayer.clearLayers();
+            if (!allConflicts || allConflicts.length === 0) return;
+
+            var bounds = map.getBounds();
+            allConflicts.forEach(function(cf) {{
+                var isFocusedLine = (focusedCellId && (cf.cell_a_id === focusedCellId || cf.cell_b_id === focusedCellId));
+                if (viewportFiltering && !isFocusedLine) {{
+                    var in1 = bounds.contains([cf.lat1, cf.lon1]);
+                    var in2 = bounds.contains([cf.lat2, cf.lon2]);
+                    if (!in1 || !in2) {{
+                        return; // Ocultar línea si alguna de las estaciones queda fuera de la vista
+                    }}
+                }}
+                drawConflictLine(cf.lat1, cf.lon1, cf.lat2, cf.lon2, cf.type, cf.text);
+            }});
+        }}
+
+        function setViewportFiltering(enabled) {{
+            viewportFiltering = enabled;
+            renderConflicts();
+        }}
+
+        function focusCell(cellId) {{
+            focusedCellId = cellId || null;
+            if (cellId && cellLayers[cellId]) {{
+                var item = cellLayers[cellId];
+                map.setView([item.lat, item.lon], 16, {{ animate: true }});
+                setTimeout(function() {{
+                    item.polygon.openPopup();
+                }}, 300);
+            }} else {{
+                var b = L.latLngBounds();
+                var count = 0;
+                for (var k in cellLayers) {{
+                    b.extend([cellLayers[k].lat, cellLayers[k].lon]);
+                    count++;
+                }}
+                if (count > 0) {{
+                    map.fitBounds(b, {{ padding: [50, 50] }});
+                }}
+            }}
+            renderConflicts();
+        }}
+
+        map.on('moveend', function() {{
+            if (viewportFiltering) {{
+                renderConflicts();
+            }}
+        }});
+
         function updateMapData(data) {{
             sectorsLayer.clearLayers();
             conflictsLayer.clearLayers();
+            cellLayers = {{}};
+            allConflicts = data.conflicts || [];
+            viewportFiltering = (data.viewport_filter !== undefined) ? data.viewport_filter : true;
+            focusedCellId = data.focused_cell_id || null;
             window.totalCellsCount = (data.cells ? data.cells.length : 0);
 
             var bounds = L.latLngBounds();
@@ -253,14 +393,12 @@ class MapWidget(QWidget):
             }});
 
             // Render conflict lines
-            if (data.conflicts) {{
-                data.conflicts.forEach(function(cf) {{
-                    drawConflictLine(cf.lat1, cf.lon1, cf.lat2, cf.lon2, cf.type, cf.text);
-                }});
-            }}
+            renderConflicts();
 
-            if (data.cells.length > 0) {{
+            if (data.cells.length > 0 && !focusedCellId) {{
                 map.fitBounds(bounds, {{padding: [50, 50]}});
+            }} else if (focusedCellId && cellLayers[focusedCellId]) {{
+                focusCell(focusedCellId);
             }}
         }}
     </script>
@@ -296,6 +434,15 @@ class MapWidget(QWidget):
 
         self.combo_plan.blockSignals(False)
 
+        # Populate cell combo box (Requirement 1)
+        self.combo_cell.blockSignals(True)
+        self.combo_cell.clear()
+        self.combo_cell.addItem("🔍 Todas las celdas", "")
+        for cid, cell in sorted(self.cells.items()):
+            st_name = cell.station.name if cell.station else ""
+            self.combo_cell.addItem(f"{cid} ({st_name})", cid)
+        self.combo_cell.blockSignals(False)
+
         # Populate available frequencies combo box
         all_freqs = set()
         for cell in self.cells.values():
@@ -319,8 +466,21 @@ class MapWidget(QWidget):
     def _on_filter_changed(self):
         self._refresh_map()
 
+    def _on_cell_selected(self):
+        cid = self.combo_cell.currentData() or ""
+        js_code = f"focusCell({json.dumps(cid)});"
+        self.web_view.page().runJavaScript(js_code)
+
+    def _on_viewport_filter_toggled(self, checked: bool):
+        js_code = f"setViewportFiltering({json.dumps(checked)});"
+        self.web_view.page().runJavaScript(js_code)
+
     def _reset_map_view(self):
-        self._refresh_map()
+        self.combo_cell.blockSignals(True)
+        self.combo_cell.setCurrentIndex(0)
+        self.combo_cell.blockSignals(False)
+        js_code = "focusCell('');"
+        self.web_view.page().runJavaScript(js_code)
 
     def _refresh_map(self):
         """Build JSON payload and trigger JS map update."""
@@ -345,24 +505,45 @@ class MapWidget(QWidget):
 
         # Prepare cell sector objects for Leaflet
         cell_objs = []
+        modified_cids = set()
+
         for cid, cell in sorted(self.cells.items()):
             bcch, tch_list = assignments.get(cid, (cell.bcch or 0, cell.tch_list))
+            orig_bcch = cell.bcch
+            orig_tch = sorted(cell.tch_list)
+            cur_bcch = bcch
+            cur_tch = sorted(tch_list)
+
+            is_modified = bool(selected_plan is not None and ((orig_bcch != cur_bcch) or (orig_tch != cur_tch)))
+            if is_modified:
+                modified_cids.add(cid)
+
+            # Filter if 'Solo celdas modificadas' is checked
+            if self.chk_only_modified.isChecked() and not is_modified:
+                continue
 
             # Filter by target frequency if selected
             if target_freq is not None and target_freq > 0:
                 if bcch != target_freq and target_freq not in tch_list:
                     continue
 
+            lat = cell.station.latitude if cell.station else 0.0
+            lon = cell.station.longitude if cell.station else 0.0
+            st_name = cell.station.name if cell.station else ""
+
             color = _freq_to_color(bcch)
             cell_objs.append({
                 "cell_id": cell.cell_id,
-                "station_name": cell.station.name,
+                "station_name": st_name,
                 "sector": cell.sector,
                 "azimuth": cell.azimuth,
-                "lat": cell.station.latitude,
-                "lon": cell.station.longitude,
+                "lat": lat,
+                "lon": lon,
                 "bcch": bcch,
                 "tch_list": tch_list,
+                "orig_bcch": orig_bcch,
+                "orig_tch": orig_tch,
+                "is_modified": is_modified,
                 "color": color
             })
 
@@ -378,8 +559,13 @@ class MapWidget(QWidget):
 
                 cell_a = self.cells.get(v.cell_a_id)
                 cell_b = self.cells.get(v.cell_b_id)
-                if not cell_a or not cell_b:
+                if not cell_a or not cell_b or not cell_a.station or not cell_b.station:
                     continue
+
+                # If showing only modified cells, conflict must touch at least one modified cell
+                if self.chk_only_modified.isChecked():
+                    if cell_a.cell_id not in modified_cids and cell_b.cell_id not in modified_cids:
+                        continue
 
                 # Filter conflict lines if specific ARFCN filter is active
                 if target_freq is not None and target_freq > 0:
@@ -394,13 +580,17 @@ class MapWidget(QWidget):
                     "lon1": cell_a.station.longitude,
                     "lat2": cell_b.station.latitude,
                     "lon2": cell_b.station.longitude,
+                    "cell_a_id": cell_a.cell_id,
+                    "cell_b_id": cell_b.cell_id,
                     "type": v.violation_type,
                     "text": text
                 })
 
         payload = {
             "cells": cell_objs,
-            "conflicts": conflict_objs
+            "conflicts": conflict_objs,
+            "viewport_filter": self.chk_viewport_filter.isChecked(),
+            "focused_cell_id": self.combo_cell.currentData() or None
         }
 
         js_code = f"updateMapData({json.dumps(payload)});"

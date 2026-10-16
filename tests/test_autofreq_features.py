@@ -56,17 +56,17 @@ class TestAutofreqFeatures(unittest.TestCase):
         """Test calculation of HO weights across all statistical models."""
         stats = {"mean": 50.0, "median": 30.0, "max": 200.0, "min": 0.0, "count": 10.0}
 
-        # None HO should be neutral 1.0 for all models
+        # None or 0 HO should be neutral 1.0 for all models
         for m in STATISTICAL_MODELS:
             self.assertEqual(_ho_weight(None, model=m, stats=stats), 1.0)
-            self.assertEqual(_ho_weight(0, model=m, stats=stats), 0.1)
+            self.assertEqual(_ho_weight(0, model=m, stats=stats), 1.0)
 
         # Uniform should always return 1.0
         self.assertEqual(_ho_weight(100, model="uniform", stats=stats), 1.0)
 
-        # Logarithmic
+        # Logarithmic: 1.0 + 0.5 * log2(1 + 50)
         w_log = _ho_weight(50, model="logarithmic", stats=stats)
-        self.assertAlmostEqual(w_log, 5.6724, places=3)
+        self.assertAlmostEqual(w_log, 3.8362, places=3)
 
         # Linear
         w_lin = _ho_weight(50, model="linear", stats=stats)

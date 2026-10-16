@@ -16,6 +16,18 @@ from src.models.frequency_plan import (
 from src.engine.constraints import FrequencyRules
 
 
+def _distance_factor(distance_km: float, decay: float = 0.3) -> float:
+    """
+    Continuous distance factor for RF interference potential.
+    Closer cells have significantly higher interference impact.
+    For d = 0 (same station / colocated): returns 2.0.
+    For d > 0: returns max(0.1, 1.0 / (1.0 + decay * distance_km)).
+    """
+    if distance_km <= 0.0:
+        return 2.0
+    return max(0.1, 1.0 / (1.0 + decay * distance_km))
+
+
 def _ho_weight(
     ho_count: Optional[int],
     model: str = "logarithmic",
@@ -23,25 +35,12 @@ def _ho_weight(
 ) -> float:
     """
     Weight multiplier based on handover count and the configured statistical model.
-
-    Statistical Models:
-    1. 'logarithmic': w = log2(1 + ho) if ho > 0 else 0.1
-       Sublinear scaling, mitigates extreme variance and prevents network bottlenecks
-       from overwhelming softer neighbor relations.
-    2. 'linear': w = 1.0 + (ho / mean_ho) * 1.5
-       Directly proportional to handover traffic volume relative to network mean.
-    3. 'sigmoid': w = 0.2 + 3.8 / (1.0 + exp(-k * (ho - median_ho)))
-       S-curve centered at median handover. Soft penalty below threshold, rapid
-       saturation for relations exceeding the critical threshold.
-    4. 'exponential': w = 1.0 + 5.0 * (ho / max_ho) ** 2
-       Quadratic Pareto law (80/20) heavily penalizing top hotspot relations.
-    5. 'uniform': w = 1.0
-       Pure topological assignment without handover weighting.
+    When HO is missing or <= 0, returns 1.0 (neutral baseline, ensuring cells without
+    HO telemetry are NOT ignored or discounted).
+    When HO > 0, provides a smooth priority boost for active traffic routes.
     """
-    if ho_count is None:
+    if ho_count is None or ho_count <= 0:
         return 1.0
-    if ho_count <= 0:
-        return 0.1
 
     if model == "uniform":
         return 1.0
@@ -52,23 +51,32 @@ def _ho_weight(
 
     if model == "linear":
         ratio = ho_count / max(1.0, mean_ho)
-        return max(0.1, 1.0 + ratio * 1.5)
+        return min(3.0, 1.0 + ratio * 0.75)
 
     elif model == "sigmoid":
         scale = max(5.0, median_ho * 0.5)
         z = (ho_count - median_ho) / scale
         z = max(-10.0, min(10.0, z))  # Prevent math overflow
         sig = 1.0 / (1.0 + math.exp(-z))
-        return max(0.1, 0.2 + 3.8 * sig)
+        return 1.0 + 1.5 * sig
 
     elif model == "exponential":
-        ratio = ho_count / max(1.0, max_ho)
-        ratio = min(2.0, ratio)
-        return max(0.1, 1.0 + 5.0 * (ratio ** 2))
+        ratio = min(2.0, ho_count / max(1.0, max_ho))
+        return 1.0 + 2.0 * (ratio ** 2)
 
     else:
         # Default: logarithmic
-        return math.log2(1 + ho_count)
+        return 1.0 + 0.5 * math.log2(1.0 + ho_count)
+
+
+def _is_freq_inherited(cell: Optional[Cell], channel_type: str, freq: int) -> bool:
+    """Check if a frequency was already present in the baseline cell configuration."""
+    if not cell:
+        return False
+    if channel_type == "BCCH":
+        return cell.bcch == freq
+    else:
+        return freq in cell.tch_list
 
 
 def _distance_penalty(distance_km: float, threshold_km: float) -> float:
@@ -192,9 +200,13 @@ def evaluate_plan(
     result = PlanResult(plan_id=plan_id, run_id=run_id)
     violations = [] if collect_violations else None
     total_score = 0.0
+    inherited_cost = 0.0
+    new_assignment_cost = 0.0
 
     ho_stats = neighbor_graph.get_ho_statistics()
     ho_model = getattr(rules, "ho_statistical_model", "logarithmic")
+    decay = getattr(rules, "distance_decay", 0.3)
+    neighbor_mult = getattr(rules, "weight_neighbor_factor", 1.3)
 
     # Track which pairs we've already checked
     checked_pairs: set[tuple[str, str]] = set()
@@ -228,7 +240,9 @@ def evaluate_plan(
             or (relation.distance_km == 0.0)
         )
 
+        dist_f = _distance_factor(relation.distance_km, decay=decay)
         ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
+        rel_multiplier = 2.0 if same_station else (dist_f * neighbor_mult * ho_w)
 
         for freq_a, type_a, freq_b, type_b in _get_freq_pairs(a_assign, b_assign):
             diff = abs(freq_a - freq_b)
@@ -255,8 +269,17 @@ def evaluate_plan(
             )
 
             hard_penalty = 10_000_000.0 if is_hard else 0.0
-            cost = (weight + hard_penalty) * ho_w
+            cost = (weight + hard_penalty) * rel_multiplier
             total_score += cost
+
+            # Cost attribution: inherited vs new assignment
+            a_inh = _is_freq_inherited(cell_a, type_a, freq_a)
+            b_inh = _is_freq_inherited(cell_b, type_b, freq_b)
+            is_inh = a_inh and b_inh
+            if is_inh:
+                inherited_cost += cost
+            else:
+                new_assignment_cost += cost
 
             # Count by type
             if is_cochannel:
@@ -291,7 +314,8 @@ def evaluate_plan(
                     channel_type_b=type_b,
                     ho_count=relation.ho_count,
                     distance_km=relation.distance_km,
-                    weighted_cost=cost
+                    weighted_cost=cost,
+                    is_inherited=is_inh
                 )
                 violations.append(v)
 
@@ -316,6 +340,8 @@ def evaluate_plan(
 
                 a_assign = assignments[ca_id]
                 b_assign = assignments[cb_id]
+                cell_a = cells.get(ca_id)
+                cell_b = cells.get(cb_id)
 
                 for freq_a, type_a, freq_b, type_b in _get_freq_pairs(a_assign, b_assign):
                     diff = abs(freq_a - freq_b)
@@ -343,6 +369,14 @@ def evaluate_plan(
                     hard_penalty = 10_000_000.0 if is_hard else 0.0
                     cost = weight + hard_penalty
                     total_score += cost
+
+                    a_inh = _is_freq_inherited(cell_a, type_a, freq_a)
+                    b_inh = _is_freq_inherited(cell_b, type_b, freq_b)
+                    is_inh = a_inh and b_inh
+                    if is_inh:
+                        inherited_cost += cost
+                    else:
+                        new_assignment_cost += cost
 
                     if is_cochannel:
                         result.same_station_cochannel += 1
@@ -372,13 +406,15 @@ def evaluate_plan(
                             channel_type_b=type_b,
                             ho_count=None,
                             distance_km=0.0,
-                            weighted_cost=cost
+                            weighted_cost=cost,
+                            is_inherited=is_inh
                         )
                         violations.append(v)
 
     # ── 3. Internal cell separation check ──────────────────────────
     # Under no circumstances can frequencies repeat in the same cell between BCCH and TCH or among TCHs
     for cid, assign in assignments.items():
+        cell_orig = cells.get(cid)
         all_freqs = [("BCCH", assign.bcch)] + [("TCH", f) for f in assign.tch_list]
         for i in range(len(all_freqs)):
             for j in range(i + 1, len(all_freqs)):
@@ -389,6 +425,14 @@ def evaluate_plan(
                     # Critical cochannel violation within the same cell
                     hard_cost = 10_000_000.0
                     total_score += hard_cost
+                    a_inh = _is_freq_inherited(cell_orig, type_i, freq_i)
+                    b_inh = _is_freq_inherited(cell_orig, type_j, freq_j)
+                    is_inh = a_inh and b_inh
+                    if is_inh:
+                        inherited_cost += hard_cost
+                    else:
+                        new_assignment_cost += hard_cost
+
                     if "BCCH" in (type_i, type_j):
                         result.cochannel_bcch_tch += 1
                     else:
@@ -404,12 +448,20 @@ def evaluate_plan(
                             channel_type_b=type_j,
                             ho_count=None,
                             distance_km=0.0,
-                            weighted_cost=hard_cost
+                            weighted_cost=hard_cost,
+                            is_inherited=is_inh
                         )
                         violations.append(v)
                 elif diff < rules.min_separation_same_cell:
                     penalty = rules.weight_same_station_adjacent * 2
                     total_score += penalty
+                    a_inh = _is_freq_inherited(cell_orig, type_i, freq_i)
+                    b_inh = _is_freq_inherited(cell_orig, type_j, freq_j)
+                    is_inh = a_inh and b_inh
+                    if is_inh:
+                        inherited_cost += penalty
+                    else:
+                        new_assignment_cost += penalty
 
     # ── 4. Distance penalty for non-neighbor close cells ───────────
     if rules.enable_distance_penalty:
@@ -425,11 +477,24 @@ def evaluate_plan(
 
             freqs_a = [a_assign.bcch] + a_assign.tch_list
             freqs_b = [b_assign.bcch] + b_assign.tch_list
-            cochannel_count = len(set(freqs_a) & set(freqs_b))
-            if cochannel_count > 0:
-                total_score += rules.weight_distance * dp * cochannel_count
+            common_freqs = set(freqs_a) & set(freqs_b)
+            if common_freqs:
+                cost = rules.weight_distance * dp * len(common_freqs)
+                total_score += cost
+                cell_a = cells.get(ca_id)
+                cell_b = cells.get(cb_id)
+                for cf in common_freqs:
+                    a_inh = (cell_a.bcch == cf or cf in cell_a.tch_list) if cell_a else False
+                    b_inh = (cell_b.bcch == cf or cf in cell_b.tch_list) if cell_b else False
+                    unit_cost = rules.weight_distance * dp
+                    if a_inh and b_inh:
+                        inherited_cost += unit_cost
+                    else:
+                        new_assignment_cost += unit_cost
 
     result.score = total_score
+    result.inherited_cost = inherited_cost
+    result.new_assignment_cost = new_assignment_cost
     result.assignments = list(assignments.values())
     if collect_violations:
         result.violations = violations

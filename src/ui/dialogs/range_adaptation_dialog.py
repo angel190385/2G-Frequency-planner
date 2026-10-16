@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QSpinBox, QGridLayout, QLineEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QRadioButton, QButtonGroup,
-    QMessageBox, QSplitter, QWidget, QFrame, QScrollArea
+    QMessageBox, QSplitter, QWidget, QFrame, QScrollArea, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QFont
@@ -219,6 +219,30 @@ class RangeAdaptationDialog(QDialog):
 
         strat_layout.addWidget(self.rad_improve_with_new)
         strat_layout.addWidget(self.rad_disappeared_only)
+
+        # Selector for including all TCHs in cells with affected TCHs
+        self.chk_include_all_tchs = QCheckBox(
+            "🔄 Incluir todos los TCH adicionales en celdas con afectación de TCH"
+        )
+        self.chk_include_all_tchs.setChecked(True)
+        self.chk_include_all_tchs.setStyleSheet(
+            "QCheckBox { color: #00d4aa; font-weight: bold; font-size: 12px; margin-top: 6px; }"
+        )
+        self.chk_include_all_tchs.setToolTip(
+            "Al modificar un TCH prohibido o fuera de rango en una celda, incluir también los restantes TCHs "
+            "de esa misma celda para que el algoritmo optimice todo su conjunto de portadoras sin coste operativo adicional."
+        )
+        self.chk_include_all_tchs.stateChanged.connect(self._update_analysis)
+
+        lbl_tch_desc = QLabel(
+            "💡 <i>Dado que ya se va a intervenir la celda para reconfigurar un TCH, "
+            "optimizar también los otros TCHs de esa celda no añade coste operativo y desatasca la vecindad.</i>"
+        )
+        lbl_tch_desc.setWordWrap(True)
+        lbl_tch_desc.setStyleSheet("color: #a0a0b0; font-size: 11px; margin-left: 20px; margin-bottom: 4px;")
+
+        strat_layout.addWidget(self.chk_include_all_tchs)
+        strat_layout.addWidget(lbl_tch_desc)
         layout.addWidget(strat_group)
 
         # ── Buttons ───────────────────────────────────────────────
@@ -230,6 +254,24 @@ class RangeAdaptationDialog(QDialog):
         )
         self.btn_greedy.clicked.connect(self._on_greedy_substitute)
         btn_layout.addWidget(self.btn_greedy)
+
+        self.btn_mark_all_tchs = QPushButton("🔄 Reoptimizar todos los TCH en celdas afectadas")
+        self.btn_mark_all_tchs.setToolTip(
+            "Activa la reoptimización de todos los TCHs de las celdas que tengan algún TCH fuera de rango"
+        )
+        self.btn_mark_all_tchs.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;
+                color: #00d4aa;
+                font-weight: bold;
+                border: 1px solid #00d4aa;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover { background-color: #00d4aa; color: #1e272e; }
+        """)
+        self.btn_mark_all_tchs.clicked.connect(self._on_mark_all_tchs_clicked)
+        btn_layout.addWidget(self.btn_mark_all_tchs)
 
         btn_layout.addStretch()
 
@@ -410,6 +452,20 @@ class RangeAdaptationDialog(QDialog):
             f"{an.total_affected_tch_count} canales TCH deben sustituirse."
         )
 
+        inc_all = getattr(self, "chk_include_all_tchs", None) and self.chk_include_all_tchs.isChecked()
+        if inc_all:
+            extra_tchs = 0
+            for cid, info in an.affected_cells.items():
+                if info["tch_affected_indices"]:
+                    cell = self.cells.get(cid)
+                    if cell:
+                        extra_tchs += max(0, len(cell.tch_list) - len(info["tch_affected_indices"]))
+            if extra_tchs > 0:
+                details.append(
+                    f"<b>🔄 Reconfiguración ampliada de TCH:</b> Se incluirán {extra_tchs} canales TCH adicionales "
+                    f"en celdas que ya modifican un TCH para optimizar el conjunto completo."
+                )
+
         self.lbl_analysis_details.setText("<br>".join(details))
 
         # Refresh affected table
@@ -469,6 +525,15 @@ class RangeAdaptationDialog(QDialog):
     def _get_selected_mode(self) -> str:
         return "improve_with_new" if self.rad_improve_with_new.isChecked() else "disappeared_only"
 
+    def _on_mark_all_tchs_clicked(self):
+        """Activate inclusion of all TCHs in cells that already have an affected TCH."""
+        self.chk_include_all_tchs.setChecked(True)
+        self._update_analysis()
+        QMessageBox.information(
+            self, "TCHs Adicionales Incluidos",
+            "Se ha activado la reoptimización de todos los TCHs de las celdas que contienen canales a sustituir."
+        )
+
     def _on_greedy_substitute(self):
         """Perform immediate heuristic greedy substitution on the loaded cells."""
         if not self.analysis:
@@ -518,12 +583,14 @@ class RangeAdaptationDialog(QDialog):
             return
 
         mode = self._get_selected_mode()
+        include_all = getattr(self, "chk_include_all_tchs", None) and self.chk_include_all_tchs.isChecked()
         total_vars = apply_spectrum_shift_to_cells(
             cells=self.cells,
             neighbor_graph=self.neighbor_graph,
             rules=self.rules,
             analysis=self.analysis,
-            mode=mode
+            mode=mode,
+            include_all_cell_tchs=include_all
         )
         self.applied_mode = mode
 
@@ -540,12 +607,14 @@ class RangeAdaptationDialog(QDialog):
             return
 
         mode = self._get_selected_mode()
+        include_all = getattr(self, "chk_include_all_tchs", None) and self.chk_include_all_tchs.isChecked()
         apply_spectrum_shift_to_cells(
             cells=self.cells,
             neighbor_graph=self.neighbor_graph,
             rules=self.rules,
             analysis=self.analysis,
-            mode=mode
+            mode=mode,
+            include_all_cell_tchs=include_all
         )
         self.applied_mode = mode
         self.optimize_requested.emit(mode)

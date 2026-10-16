@@ -211,6 +211,7 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
     violations_data = []
     for v in sorted(plan.violations, key=lambda x: x.weighted_cost, reverse=True):
         both = f"{v.channel_type_a}-{v.channel_type_b}"
+        is_inh = getattr(v, "is_inherited", False)
         violations_data.append({
             "type": "Cocanal" if v.violation_type == "cochannel" else "Adyacente",
             "channel_types": both,
@@ -221,15 +222,31 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
             "ho": v.ho_count if v.ho_count is not None else 0,
             "dist": int(v.distance_km) if v.distance_km.is_integer() else round(v.distance_km, 2),
             "cost": int(v.weighted_cost) if v.weighted_cost.is_integer() else round(v.weighted_cost, 1),
-            "severity": "critical" if both == "BCCH-BCCH" else ("high" if "BCCH" in both else "medium")
+            "severity": "critical" if both == "BCCH-BCCH" else ("high" if "BCCH" in both else "medium"),
+            "is_inherited": is_inh,
+            "origin": "Preexistente" if is_inh else "Nueva Asignación"
         })
 
     channel_stats = _compute_channel_stats(plan, cells)
+
+    inherited_cost = getattr(plan, "inherited_cost", 0.0)
+    new_assignment_cost = getattr(plan, "new_assignment_cost", 0.0)
+    score_val = plan.score
+
+    inherited_cost_fmt = int(inherited_cost) if inherited_cost.is_integer() else round(inherited_cost, 1)
+    new_cost_fmt = int(new_assignment_cost) if new_assignment_cost.is_integer() else round(new_assignment_cost, 1)
+
+    inherited_pct = round((inherited_cost / score_val * 100.0), 1) if score_val > 0 else 0.0
+    new_pct = round((new_assignment_cost / score_val * 100.0), 1) if score_val > 0 else 0.0
 
     return {
         "id": plan.plan_id,
         "name": name,
         "score": int(plan.score) if plan.score.is_integer() else round(plan.score, 1),
+        "inherited_cost": inherited_cost_fmt,
+        "new_assignment_cost": new_cost_fmt,
+        "inherited_pct": inherited_pct,
+        "new_pct": new_pct,
         "critical_violations": plan.critical_violations,
         "total_violations": plan.total_violations,
         "cochannel_bcch_bcch": plan.cochannel_bcch_bcch,
@@ -268,6 +285,8 @@ def _build_payload(
         sc_dict["improvement_score"] = _calc_improvement(baseline.score, sc.score)
         sc_dict["improvement_critical"] = _calc_improvement(baseline.critical_violations, sc.critical_violations)
         sc_dict["improvement_violations"] = _calc_improvement(baseline.total_violations, sc.total_violations)
+        elim_val = max(0.0, baseline.score - getattr(sc, "inherited_cost", sc.score))
+        sc_dict["eliminated_cost"] = int(elim_val) if elim_val.is_integer() else round(elim_val, 1)
         scenarios_dicts.append(sc_dict)
 
     # Collect comprehensive set of all observed and configured channels
@@ -906,6 +925,72 @@ def _build_html_template(payload: dict) -> str:
             display: none;
         }}
 
+        .cost-breakdown-panel {{
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 18px 20px;
+            margin-bottom: 24px;
+        }}
+
+        .cost-breakdown-bar {{
+            display: flex;
+            height: 18px;
+            border-radius: 9px;
+            overflow: hidden;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            margin: 14px 0 16px 0;
+        }}
+
+        .cost-bar-inherited {{
+            background: linear-gradient(90deg, #2563eb 0%, #06b6d4 100%);
+            height: 100%;
+            transition: width 0.4s ease;
+        }}
+
+        .cost-bar-new {{
+            background: linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%);
+            height: 100%;
+            transition: width 0.4s ease;
+        }}
+
+        .cost-breakdown-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+        }}
+
+        .cost-attr-card {{
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }}
+
+        .cost-attr-title {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .cost-attr-val {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 20px;
+            font-weight: 800;
+        }}
+
+        .cost-attr-sub {{
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }}
+
         /* Print Style */
         @media print {{
             body {{
@@ -916,7 +1001,7 @@ def _build_html_template(payload: dict) -> str:
             header, .scenario-selector-wrap, .filter-bar, .header-actions {{
                 display: none !important;
             }}
-            .panel {{
+            .panel, .cost-breakdown-panel {{
                 border: 1px solid #ccc !important;
                 box-shadow: none !important;
                 page-break-inside: avoid;
@@ -960,6 +1045,46 @@ def _build_html_template(payload: dict) -> str:
             <span id="label-cells-summary"></span>
         </div>
         <div class="scenario-tabs" id="scenario-tabs-container"></div>
+    </div>
+
+    <!-- Cost Decomposition Section (Task 4) -->
+    <div class="cost-breakdown-panel" id="cost-breakdown-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 2px;">
+                    🎯 Descomposición y Atribución del Coste de Interferencia (<span id="cost-active-plan-title"></span>)
+                </h3>
+                <p style="font-size: 12px; color: var(--text-muted);">
+                    Diferenciación exacta entre el coste preexistente heredado y el coste generado por las nuevas asignaciones.
+                </p>
+            </div>
+            <div id="cost-breakdown-summary-badge" class="badge-pill badge-info"></div>
+        </div>
+
+        <!-- Stacked Visual Bar -->
+        <div class="cost-breakdown-bar">
+            <div id="cost-bar-seg-inherited" class="cost-bar-inherited" style="width: 50%;"></div>
+            <div id="cost-bar-seg-new" class="cost-bar-new" style="width: 50%;"></div>
+        </div>
+
+        <!-- Metric Attribution Cards -->
+        <div class="cost-breakdown-grid">
+            <div class="cost-attr-card" style="border-left: 3px solid #06b6d4;">
+                <span class="cost-attr-title">🟦 Coste Heredado (Preexistente)</span>
+                <span class="cost-attr-val" id="cost-val-inherited" style="color: #38bdf8;">0</span>
+                <span class="cost-attr-sub" id="cost-sub-inherited">Interferencias que ya existían en la red base porque las frecuencias no se modificaron.</span>
+            </div>
+            <div class="cost-attr-card" style="border-left: 3px solid #ec4899;">
+                <span class="cost-attr-title">🟪 Coste por Nuevas Asignaciones</span>
+                <span class="cost-attr-val" id="cost-val-new" style="color: #f472b6;">0</span>
+                <span class="cost-attr-sub" id="cost-sub-new">Interferencias generadas específicamente por las frecuencias recién reasignadas.</span>
+            </div>
+            <div class="cost-attr-card" style="border-left: 3px solid #10b981;">
+                <span class="cost-attr-title">🟢 Coste Original Eliminado</span>
+                <span class="cost-attr-val" id="cost-val-eliminated" style="color: #34d399;">0</span>
+                <span class="cost-attr-sub" id="cost-sub-eliminated">Reducción absoluta conseguida sobre las interferencias del plan original.</span>
+            </div>
+        </div>
     </div>
 
     <!-- Dynamic KPI Grid -->
@@ -1131,12 +1256,21 @@ def _build_html_template(payload: dict) -> str:
 
         <div class="filter-bar">
             <input type="text" id="search-viol" class="search-input" placeholder="🔍 Filtrar por Celda A o Celda B..." oninput="renderViolationsTable()">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: var(--text-muted);">Origen:</span>
+                <select id="filter-viol-origin" class="select-styled" onchange="renderViolationsTable()">
+                    <option value="all">Todo el Origen</option>
+                    <option value="inherited">Solo Preexistente (Heredado)</option>
+                    <option value="new">Solo Nuevas Asignaciones</option>
+                </select>
+            </div>
         </div>
 
         <div class="data-table-wrap" style="max-height: 380px; overflow-y: auto;">
             <table>
                 <thead>
                     <tr>
+                        <th>Origen Coste</th>
                         <th>Tipo Conflicto</th>
                         <th>Celda A</th>
                         <th>Celda B</th>
@@ -1270,6 +1404,40 @@ def _build_html_template(payload: dict) -> str:
     function renderKpis(plan, base) {{
         const container = document.getElementById('kpi-grid-container');
 
+        // Update Cost Decomposition Component
+        const decTitle = document.getElementById('cost-active-plan-title');
+        if (decTitle) decTitle.innerText = plan.name;
+
+        const inhVal = document.getElementById('cost-val-inherited');
+        if (inhVal) inhVal.innerText = `${{fmtNum(plan.inherited_cost)}} (${{plan.inherited_pct}}%)`;
+
+        const newVal = document.getElementById('cost-val-new');
+        if (newVal) newVal.innerText = `${{fmtNum(plan.new_assignment_cost)}} (${{plan.new_pct}}%)`;
+
+        const elimVal = document.getElementById('cost-val-eliminated');
+        if (elimVal) {{
+            const eliminated = activeScenarioIndex === -1 ? 0 : (plan.eliminated_cost || Math.max(0, base.score - plan.inherited_cost));
+            const elimPct = base.score > 0 ? fmtNum((eliminated / base.score) * 100) : '0';
+            elimVal.innerText = activeScenarioIndex === -1 ? '0 (Línea base)' : `-${{fmtNum(eliminated)}} (-${{elimPct}}%)`;
+        }}
+
+        const barInh = document.getElementById('cost-bar-seg-inherited');
+        const barNew = document.getElementById('cost-bar-seg-new');
+        if (barInh && barNew) {{
+            const total = (plan.inherited_cost + plan.new_assignment_cost) || 1;
+            const inhP = Math.max(0, Math.min(100, (plan.inherited_cost / total) * 100));
+            const newP = Math.max(0, Math.min(100, (plan.new_assignment_cost / total) * 100));
+            barInh.style.width = `${{inhP}}%`;
+            barNew.style.width = `${{newP}}%`;
+            barInh.title = `Coste Heredado: ${{fmtNum(plan.inherited_cost)}} (${{inhP.toFixed(1)}}%)`;
+            barNew.title = `Coste Nuevas Asignaciones: ${{fmtNum(plan.new_assignment_cost)}} (${{newP.toFixed(1)}}%)`;
+        }}
+
+        const badgeSummary = document.getElementById('cost-breakdown-summary-badge');
+        if (badgeSummary) {{
+            badgeSummary.innerText = `${{plan.inherited_pct}}% Heredado • ${{plan.new_pct}}% Nuevas`;
+        }}
+
         function diffHtml(newVal, oldVal, lowerIsBetter = true) {{
             if (activeScenarioIndex === -1) return '';
             const diff = oldVal - newVal;
@@ -1286,6 +1454,16 @@ def _build_html_template(payload: dict) -> str:
                 <div class="kpi-value">${{fmtNum(plan.score)}}</div>
                 ${{activeScenarioIndex !== -1 ? diffHtml(plan.score, base.score) : '<div class="kpi-change change-neutral">Línea base</div>'}}
             </div>
+            <div class="kpi-card" style="border-top: 3px solid #06b6d4;">
+                <div class="kpi-title">Coste Heredado (Preexistente)</div>
+                <div class="kpi-value" style="color: #38bdf8;">${{fmtNum(plan.inherited_cost)}} <span style="font-size: 13px; font-weight: normal; color: var(--text-muted);">(${{plan.inherited_pct}}%)</span></div>
+                <div class="kpi-change change-neutral">Coste original invariable</div>
+            </div>
+            <div class="kpi-card" style="border-top: 3px solid #ec4899;">
+                <div class="kpi-title">Coste Nuevas Asignaciones</div>
+                <div class="kpi-value" style="color: #f472b6;">${{fmtNum(plan.new_assignment_cost)}} <span style="font-size: 13px; font-weight: normal; color: var(--text-muted);">(${{plan.new_pct}}%)</span></div>
+                <div class="kpi-change change-neutral">Generado por reasignación</div>
+            </div>
             <div class="kpi-card">
                 <div class="kpi-title">Violaciones Críticas (BCCH-BCCH)</div>
                 <div class="kpi-value" style="color: ${{plan.critical_violations > 0 ? 'var(--danger)' : 'var(--success)'}};">${{plan.critical_violations}}</div>
@@ -1295,11 +1473,6 @@ def _build_html_template(payload: dict) -> str:
                 <div class="kpi-title">Total Violaciones</div>
                 <div class="kpi-value" style="color: ${{plan.total_violations > 0 ? 'var(--warning)' : 'var(--success)'}};">${{plan.total_violations}}</div>
                 ${{activeScenarioIndex !== -1 ? diffHtml(plan.total_violations, base.total_violations) : '<div class="kpi-change change-neutral">Línea base</div>'}}
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-title">Ponderación HO Cocanal</div>
-                <div class="kpi-value">${{fmtNum(plan.cochannel_ho_weighted)}}</div>
-                ${{activeScenarioIndex !== -1 ? diffHtml(plan.cochannel_ho_weighted, base.cochannel_ho_weighted) : '<div class="kpi-change change-neutral">Línea base</div>'}}
             </div>
             <div class="kpi-card">
                 <div class="kpi-title">Celdas Modificadas</div>
@@ -1318,6 +1491,9 @@ def _build_html_template(payload: dict) -> str:
 
         const metrics = [
             {{ name: "Score Global (Coste Total)", b: fmtNum(b.score), s1: fmtNum(s1.score), s2: s2 ? fmtNum(s2.score) : "—", s3: s3 ? fmtNum(s3.score) : "—", imp: s1.improvement_score }},
+            {{ name: "Coste Heredado (Preexistente)", b: fmtNum(b.inherited_cost), s1: `${{fmtNum(s1.inherited_cost)}} (${{s1.inherited_pct}}%)`, s2: s2 ? `${{fmtNum(s2.inherited_cost)}} (${{s2.inherited_pct}}%)` : "—", s3: s3 ? `${{fmtNum(s3.inherited_cost)}} (${{s3.inherited_pct}}%)` : "—", imp: "-" }},
+            {{ name: "Coste por Nuevas Asignaciones", b: fmtNum(b.new_assignment_cost), s1: `${{fmtNum(s1.new_assignment_cost)}} (${{s1.new_pct}}%)`, s2: s2 ? `${{fmtNum(s2.new_assignment_cost)}} (${{s2.new_pct}}%)` : "—", s3: s3 ? `${{fmtNum(s3.new_assignment_cost)}} (${{s3.new_pct}}%)` : "—", imp: "-" }},
+            {{ name: "Coste Original Eliminado", b: "0", s1: s1.eliminated_cost ? `-${{fmtNum(s1.eliminated_cost)}}` : "—", s2: s2 && s2.eliminated_cost ? `-${{fmtNum(s2.eliminated_cost)}}` : "—", s3: s3 && s3.eliminated_cost ? `-${{fmtNum(s3.eliminated_cost)}}` : "—", imp: "-" }},
             {{ name: "Violaciones Críticas (BCCH-BCCH)", b: b.critical_violations, s1: s1.critical_violations, s2: s2 ? s2.critical_violations : "—", s3: s3 ? s3.critical_violations : "—", imp: s1.improvement_critical }},
             {{ name: "Total Violaciones (Cocanal + Adj)", b: b.total_violations, s1: s1.total_violations, s2: s2 ? s2.total_violations : "—", s3: s3 ? s3.total_violations : "—", imp: s1.improvement_violations }},
             {{ name: "Cocanalidad BCCH-BCCH", b: b.cochannel_bcch_bcch, s1: s1.cochannel_bcch_bcch, s2: s2 ? s2.cochannel_bcch_bcch : "—", s3: s3 ? s3.cochannel_bcch_bcch : "—", imp: "-" }},
@@ -1411,17 +1587,20 @@ def _build_html_template(payload: dict) -> str:
         const tbody = document.getElementById('violations-tbody');
         const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
         const search = document.getElementById('search-viol').value.toLowerCase().trim();
+        const originFilter = document.getElementById('filter-viol-origin') ? document.getElementById('filter-viol-origin').value : 'all';
 
         const filtered = plan.violations.filter(v => {{
+            if (originFilter === 'inherited' && !v.is_inherited) return false;
+            if (originFilter === 'new' && v.is_inherited) return false;
             if (search) {{
-                const text = `${{v.cell_a}} ${{v.cell_b}} ${{v.type}} ${{v.channel_types}}`.toLowerCase();
+                const text = `${{v.cell_a}} ${{v.cell_b}} ${{v.type}} ${{v.channel_types}} ${{v.origin}}`.toLowerCase();
                 if (!text.includes(search)) return false;
             }}
             return true;
         }});
 
         if (filtered.length === 0) {{
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--success); font-weight: bold; padding: 24px;">✅ No hay violaciones registradas en este plan.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--success); font-weight: bold; padding: 24px;">✅ No hay violaciones registradas en este plan con los filtros seleccionados.</td></tr>`;
             return;
         }}
 
@@ -1433,8 +1612,13 @@ def _build_html_template(payload: dict) -> str:
             if (v.severity === 'critical') badgeClass = 'badge-danger';
             else if (v.severity === 'high') badgeClass = 'badge-warning';
 
+            const originBadge = v.is_inherited
+                ? '<span class="badge-pill" style="background: #1e293b; color: #38bdf8; border: 1px solid #0284c7; font-size: 11px;">📌 Preexistente</span>'
+                : '<span class="badge-pill" style="background: #2e1065; color: #f472b6; border: 1px solid #c026d3; font-size: 11px;">✨ Nueva Asignación</span>';
+
             return `
                 <tr>
+                    <td>${{originBadge}}</td>
                     <td><span class="badge-pill ${{badgeClass}}">${{escapeHtml(v.type)}} (${{escapeHtml(v.channel_types)}})</span></td>
                     <td style="font-weight: 700;">${{escapeHtml(v.cell_a)}}</td>
                     <td style="font-weight: 700;">${{escapeHtml(v.cell_b)}}</td>
@@ -1451,7 +1635,7 @@ def _build_html_template(payload: dict) -> str:
         if (filtered.length > maxToRender) {{
             violRowsHtml += `
                 <tr style="background: var(--bg-card);">
-                    <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 10px; font-style: italic;">
+                    <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 10px; font-style: italic;">
                         ⚡ Mostrando las primeras ${{maxToRender}} de ${{filtered.length}} violaciones. Usa el filtro superior para buscar celdas concretas.
                     </td>
                 </tr>
