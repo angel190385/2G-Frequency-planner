@@ -26,9 +26,10 @@ def _repair_chromosome(
 ) -> np.ndarray:
     """
     Guarantees hard constraints on the chromosome:
-    1. UNDER NO CIRCUMSTANCES can frequencies repeat within the same cell between BCCH and TCH,
-       or among TCHs of the same cell.
-    2. Nor between neighboring cells of the same station with distance = 0.
+    1. UNDER NO CIRCUMSTANCES can frequencies repeat or be adjacent within the same cell
+       between BCCH and TCH, or among TCHs of the same cell (min separation >= 2).
+    2. UNDER NO CIRCUMSTANCES can frequencies repeat or be adjacent between cells of the same
+       station or cells with distance = 0 (min separation >= 2).
     """
     repaired = chrom.copy()
     pool_size = len(freq_pool)
@@ -38,12 +39,23 @@ def _repair_chromosome(
     for i, var in enumerate(variables):
         cell_var_indices.setdefault(var.cell_id, []).append(i)
 
-    # 1. Enforce strictly distinct frequencies within each cell
+    # Group cells by site (station_id or identical coordinates at distance = 0)
+    station_cells: dict[str, list[str]] = {}
+    for cid, cell in cells.items():
+        if cell.station and cell.station.latitude is not None and cell.station.longitude is not None:
+            # Group by 6 decimal place lat/lon (~0.1m precision) or station_id
+            site_key = f"coord_{round(cell.station.latitude, 6)}_{round(cell.station.longitude, 6)}"
+        elif cell.station:
+            site_key = f"sid_{cell.station.station_id}"
+        else:
+            site_key = f"cell_{cid}"
+        station_cells.setdefault(site_key, []).append(cid)
+
+    # 1. Enforce strict separation (>= 2, no cochannel and no adjacent) within each cell
     for cid, var_idxs in cell_var_indices.items():
         cell = cells[cid]
         used_cell_freqs = set()
 
-        # Fixed frequencies for this cell
         if not cell.recalculate_bcch and cell.bcch is not None and cell.bcch > 0:
             used_cell_freqs.add(cell.bcch)
         for idx, f in enumerate(cell.tch_list):
@@ -53,25 +65,29 @@ def _repair_chromosome(
         for vi in var_idxs:
             freq_idx = int(repaired[vi]) % pool_size
             freq = int(freq_pool[freq_idx])
-            if freq in used_cell_freqs:
-                # Duplicate in same cell: pick an unused frequency
-                avail = [idx for idx, f in enumerate(freq_pool) if int(f) not in used_cell_freqs]
+
+            # Check if freq violates cochannel (diff 0) or adjacent (diff 1) with any existing cell freq
+            has_conflict = any(abs(freq - uf) < 2 for uf in used_cell_freqs)
+            if has_conflict:
+                avail = [idx for idx, f in enumerate(freq_pool) if all(abs(int(f) - uf) >= 2 for uf in used_cell_freqs)]
                 if avail:
                     new_idx = random.choice(avail)
-                    repaired[vi] = new_idx
-                    freq = int(freq_pool[new_idx])
+                else:
+                    # Fallback if spectrum is extremely narrow: strictly avoid cochannel
+                    avail_no_co = [idx for idx, f in enumerate(freq_pool) if int(f) not in used_cell_freqs]
+                    new_idx = random.choice(avail_no_co) if avail_no_co else freq_idx
+                repaired[vi] = new_idx
+                freq = int(freq_pool[new_idx])
+
             used_cell_freqs.add(freq)
 
-    # 2. Enforce strictly distinct frequencies across cells of the same station / distance = 0
-    station_cells: dict[str, list[str]] = {}
-    for cid, cell in cells.items():
-        sid = cell.station.station_id
-        station_cells.setdefault(sid, []).append(cid)
-
+    # 2. Enforce strict separation (>= 2, no cochannel and no adjacent) across cells of the same station / distance = 0
     for sid, cids in station_cells.items():
         if len(cids) <= 1:
             continue
         used_station_freqs = set()
+
+        # Collect all fixed frequencies on this site
         for cid in cids:
             cell = cells[cid]
             if not cell.recalculate_bcch and cell.bcch is not None and cell.bcch > 0:
@@ -80,30 +96,30 @@ def _repair_chromosome(
                 if idx not in cell.tch_indices_to_recalculate and f > 0:
                     used_station_freqs.add(f)
 
+        for cid in cids:
             for vi in cell_var_indices.get(cid, []):
                 freq_idx = int(repaired[vi]) % pool_size
                 freq = int(freq_pool[freq_idx])
 
-                cell_used = set()
-                if not cell.recalculate_bcch and cell.bcch is not None and cell.bcch > 0:
-                    cell_used.add(cell.bcch)
-                for idx, f in enumerate(cell.tch_list):
-                    if idx not in cell.tch_indices_to_recalculate and f > 0:
-                        cell_used.add(f)
-                for other_vi in cell_var_indices.get(cid, []):
-                    if other_vi != vi:
-                        cell_used.add(int(freq_pool[int(repaired[other_vi]) % pool_size]))
-
-                if freq in used_station_freqs:
-                    # Conflict with another cell on same station: pick one avoiding both
-                    avail = [idx for idx, f in enumerate(freq_pool)
-                             if int(f) not in used_station_freqs and int(f) not in cell_used]
-                    if not avail:
-                        avail = [idx for idx, f in enumerate(freq_pool) if int(f) not in cell_used]
+                # Check if violates cochannel (diff 0) or adjacent (diff 1) with site
+                has_station_conflict = any(abs(freq - uf) < 2 for uf in used_station_freqs)
+                if has_station_conflict:
+                    # Look for candidate with separation >= 2 from all station frequencies
+                    avail = [
+                        idx for idx, f in enumerate(freq_pool)
+                        if all(abs(int(f) - uf) >= 2 for uf in used_station_freqs)
+                    ]
                     if avail:
                         new_idx = random.choice(avail)
-                        repaired[vi] = new_idx
-                        freq = int(freq_pool[new_idx])
+                    else:
+                        # Fallback: strictly no cochannel, maximize separation
+                        avail_no_co = [idx for idx, f in enumerate(freq_pool) if int(f) not in used_station_freqs]
+                        if avail_no_co:
+                            new_idx = max(avail_no_co, key=lambda idx: min((abs(int(freq_pool[idx]) - uf) for uf in used_station_freqs), default=0))
+                        else:
+                            new_idx = freq_idx
+                    repaired[vi] = new_idx
+                    freq = int(freq_pool[new_idx])
 
                 used_station_freqs.add(freq)
 

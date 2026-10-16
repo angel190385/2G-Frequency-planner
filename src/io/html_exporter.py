@@ -68,11 +68,25 @@ def export_plan_html(
     # 1. Baseline evaluation
     baseline = generate_baseline_plan(cells, neighbor_graph, rules)
 
-    # 2. Extract up to 3 candidate scenarios
+    # 2. Extract best candidate scenario per execution/run
     scenarios: list[PlanResult] = []
-    if results:
-        sorted_results = sorted(results, key=lambda r: r.score)
-        scenarios = sorted_results[:3]
+    if hasattr(results, "per_run") and getattr(results, "per_run"):
+        for run_id in sorted(results.per_run.keys()):
+            run_plans = results.per_run[run_id]
+            if run_plans:
+                best_of_run = min(run_plans, key=lambda r: r.score)
+                scenarios.append(best_of_run)
+    elif results:
+        runs_map: dict[int, list[PlanResult]] = {}
+        for r in results:
+            runs_map.setdefault(r.run_id, []).append(r)
+        if len(runs_map) > 1:
+            for run_id in sorted(runs_map.keys()):
+                best_of_run = min(runs_map[run_id], key=lambda r: r.score)
+                scenarios.append(best_of_run)
+        else:
+            sorted_results = sorted(results, key=lambda r: r.score)
+            scenarios = sorted_results[:5]
 
     selected_plan = None
     if selected_plan_id is not None:
@@ -211,7 +225,30 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
     violations_data = []
     for v in sorted(plan.violations, key=lambda x: x.weighted_cost, reverse=True):
         both = f"{v.channel_type_a}-{v.channel_type_b}"
-        is_inh = getattr(v, "is_inherited", False)
+        c_a = cells.get(v.cell_a_id)
+        c_b = cells.get(v.cell_b_id)
+
+        a_preexisting = False
+        if c_a:
+            if v.channel_type_a == "BCCH":
+                a_preexisting = (c_a.bcch == v.freq_a)
+            else:
+                a_preexisting = (v.freq_a in c_a.tch_list)
+
+        b_preexisting = False
+        if c_b:
+            if v.channel_type_b == "BCCH":
+                b_preexisting = (c_b.bcch == v.freq_b)
+            else:
+                b_preexisting = (v.freq_b in c_b.tch_list)
+
+        if plan.plan_id == 0 or name.startswith("Plan Actual"):
+            is_inh = True
+        else:
+            is_inh = (a_preexisting and b_preexisting)
+            if getattr(v, "is_inherited", False):
+                is_inh = True
+
         violations_data.append({
             "type": "Cocanal" if v.violation_type == "cochannel" else "Adyacente",
             "channel_types": both,
@@ -229,8 +266,16 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
 
     channel_stats = _compute_channel_stats(plan, cells)
 
-    inherited_cost = getattr(plan, "inherited_cost", 0.0)
-    new_assignment_cost = getattr(plan, "new_assignment_cost", 0.0)
+    inherited_cost = float(getattr(plan, "inherited_cost", 0.0))
+    new_assignment_cost = float(getattr(plan, "new_assignment_cost", 0.0))
+
+    if inherited_cost == 0.0 and new_assignment_cost == 0.0 and violations_data:
+        for vd in violations_data:
+            if vd["is_inherited"]:
+                inherited_cost += float(vd["cost"])
+            else:
+                new_assignment_cost += float(vd["cost"])
+
     score_val = plan.score
 
     inherited_cost_fmt = int(inherited_cost) if inherited_cost.is_integer() else round(inherited_cost, 1)
@@ -280,7 +325,8 @@ def _build_payload(
 
     scenarios_dicts = []
     for idx, sc in enumerate(scenarios, start=1):
-        name = f"Escenario {idx}" + (" (Recomendado)" if idx == 1 else "")
+        run_lbl = f" (Ejecución {sc.run_id})" if getattr(sc, "run_id", 0) > 0 else ""
+        name = f"Escenario {idx}{run_lbl}" + (" (Recomendado)" if idx == 1 else "")
         sc_dict = _plan_to_dict(sc, name, cells)
         sc_dict["improvement_score"] = _calc_improvement(baseline.score, sc.score)
         sc_dict["improvement_critical"] = _calc_improvement(baseline.critical_violations, sc.critical_violations)

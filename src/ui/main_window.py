@@ -602,7 +602,7 @@ class MainWindow(QMainWindow):
                 self.cells = cells
                 self.stations = stations
                 self.cell_table.load_cells(cells)
-                self.map_widget.load_data(self.cells, self.results)
+                self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
                 self.status_label.setText(
                     f"Celdas importadas: {len(cells)} celdas de "
                     f"{len(stations)} estaciones")
@@ -612,6 +612,7 @@ class MainWindow(QMainWindow):
                 self.neighbor_graph = graph
                 self.neighbor_table.load_data(graph, self.cells)
                 self.ho_table.load_data(graph, self.cells)
+                self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
                 self.status_label.setText(
                     f"Vecindades importadas: {graph.total_relations} relaciones")
 
@@ -755,8 +756,8 @@ class MainWindow(QMainWindow):
             self.convergence_dialog.set_finished(best)
 
         # Show results
-        self.result_widget.load_results(results, self.cells)
-        self.map_widget.load_data(self.cells, self.results)
+        self.result_widget.load_results(results, self.cells, self.neighbor_graph, self.rules)
+        self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
         self.tabs.setCurrentIndex(3)  # Switch to Results tab
 
         self.status_label.setText(

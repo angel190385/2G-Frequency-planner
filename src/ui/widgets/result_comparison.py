@@ -84,7 +84,7 @@ class SingleRunResultWidget(QWidget):
         self.viol_tree = QTreeWidget()
         self.viol_tree.setAlternatingRowColors(True)
         self.viol_tree.setHeaderLabels([
-            "Tipo", "Celda A", "Celda B", "Freq A", "Freq B",
+            "Tipo", "Origen / Estado", "Celda A", "Celda B", "Freq A", "Freq B",
             "HO", "Coste"
         ])
         self.viol_tree.header().setSectionResizeMode(
@@ -101,11 +101,23 @@ class SingleRunResultWidget(QWidget):
 
         layout.addWidget(splitter)
 
-    def load_results(self, results: list[PlanResult], cells: dict[str, Cell]):
-        self._results = results
+    def load_results(
+        self,
+        results: list[PlanResult],
+        cells: dict[str, Cell],
+        baseline: Optional[PlanResult] = None
+    ):
+        self._baseline = baseline
         self._cells = cells
 
-        if not results:
+        # Include baseline plan as row 0 if provided
+        all_plans = []
+        if baseline is not None:
+            all_plans.append(baseline)
+        all_plans.extend(results)
+        self._results = all_plans
+
+        if not all_plans:
             self.summary_table.clear()
             self.summary_table.setRowCount(0)
             self.assign_table.clear()
@@ -123,15 +135,22 @@ class SingleRunResultWidget(QWidget):
 
         self.summary_table.setColumnCount(len(columns))
         self.summary_table.setHorizontalHeaderLabels(columns)
-        self.summary_table.setRowCount(len(results))
+        self.summary_table.setRowCount(len(all_plans))
 
-        best_score = min(r.score for r in results)
+        best_calc_score = min((r.score for r in results), default=None)
 
-        for row, result in enumerate(results):
+        for row, result in enumerate(all_plans):
+            is_base = (result is baseline)
+            plan_label = "Actual (Línea Base)" if is_base else str(result.plan_id)
+            run_label = "Línea Base" if is_base else f"Ejec. {result.run_id}"
+            score_color = None
+            if not is_base and best_calc_score is not None and result.score == best_calc_score:
+                score_color = Colors.SUCCESS
+
             values = [
-                (str(result.plan_id), None),
-                (f"Ejec. {result.run_id}", None),
-                (format_number(result.score), Colors.SUCCESS if result.score == best_score else None),
+                (plan_label, None),
+                (run_label, None),
+                (format_number(result.score), score_color),
                 (str(result.critical_violations),
                  Colors.DANGER if result.critical_violations > 0 else Colors.SUCCESS),
                 (str(result.total_violations),
@@ -162,13 +181,20 @@ class SingleRunResultWidget(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if color:
                     item.setForeground(QBrush(QColor(color)))
-                if row == 0:
+
+                if is_base:
+                    item.setBackground(QBrush(QColor("#1e293b")))
                     font = item.font()
                     font.setBold(True)
                     item.setFont(font)
+                elif row == (1 if baseline else 0):
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+
                 self.summary_table.setItem(row, col, item)
 
-            if result.score == best_score:
+            if not is_base and best_calc_score is not None and result.score == best_calc_score:
                 for col in range(len(values)):
                     item = self.summary_table.item(row, col)
                     if item:
@@ -179,8 +205,8 @@ class SingleRunResultWidget(QWidget):
         )
 
         self.summary_table.selectRow(0)
-        self._show_assignments(results[0])
-        self._show_violations(results[0])
+        self._show_assignments(all_plans[0])
+        self._show_violations(all_plans[0])
 
     def _on_plan_selected(self, current_row, current_col, prev_row, prev_col):
         if current_row < 0 or current_row >= len(self._results):
@@ -200,16 +226,28 @@ class SingleRunResultWidget(QWidget):
         self.assign_table.setHorizontalHeaderLabels(columns)
         self.assign_table.setRowCount(len(result.assignments))
 
+        is_base = (result is self._baseline or result.plan_id == 0)
+
         for row, assign in enumerate(sorted(result.assignments,
                                              key=lambda a: a.cell_id)):
             cell = self._cells.get(assign.cell_id)
             if not cell:
                 continue
 
-            bcch_changed = cell.bcch != assign.bcch
+            bcch_changed = (cell.bcch != assign.bcch) and not is_base
             tch_before = ", ".join(format_number(f) for f in cell.tch_list)
             tch_after = ", ".join(format_number(f) for f in assign.tch_list)
-            tch_changed = tch_before != tch_after
+            tch_changed = (tch_before != tch_after) and not is_base
+
+            if is_base:
+                status_text = "— (Línea Base)"
+                status_color = Colors.TEXT_DIM
+            elif bcch_changed or tch_changed:
+                status_text = "✓ Cambiado"
+                status_color = Colors.ACCENT
+            else:
+                status_text = "Sin cambio"
+                status_color = Colors.TEXT_DIM
 
             items = [
                 (assign.cell_id, None),
@@ -217,8 +255,7 @@ class SingleRunResultWidget(QWidget):
                 (cell.sector if cell else "", None),
                 (format_number(cell.bcch) if cell and cell.bcch else "—", None),
                 (format_number(assign.bcch), Colors.WARNING if bcch_changed else None),
-                ("✓ Cambiado" if bcch_changed or tch_changed else "—",
-                 Colors.ACCENT if (bcch_changed or tch_changed) else Colors.TEXT_DIM),
+                (status_text, status_color),
                 (tch_before if tch_before else "—", None),
                 (tch_after if tch_after else "—",
                  Colors.ACCENT_BLUE if tch_changed else None),
@@ -279,6 +316,8 @@ class SingleRunResultWidget(QWidget):
                     key = "🟡 Adyacencia TCH-TCH"
             groups[key].append(v)
 
+        is_base = (result is self._baseline or result.plan_id == 0)
+
         for group_name, violations in groups.items():
             if not violations:
                 continue
@@ -298,8 +337,22 @@ class SingleRunResultWidget(QWidget):
             group_item.setFont(0, font)
 
             for v in sorted(violations, key=lambda x: x.weighted_cost, reverse=True):
+                if is_base:
+                    is_inh = True
+                else:
+                    c_a = self._cells.get(v.cell_a_id)
+                    c_b = self._cells.get(v.cell_b_id)
+                    a_pre = (c_a.bcch == v.freq_a if v.channel_type_a == "BCCH" else v.freq_a in c_a.tch_list) if c_a else False
+                    b_pre = (c_b.bcch == v.freq_b if v.channel_type_b == "BCCH" else v.freq_b in c_b.tch_list) if c_b else False
+                    is_inh = (a_pre and b_pre)
+                    if getattr(v, "is_inherited", False):
+                        is_inh = True
+
+                origin_text = "📌 Preexistente" if is_inh else "✨ Modificada"
+
                 child = QTreeWidgetItem([
                     f"{v.channel_type_a}-{v.channel_type_b}",
+                    origin_text,
                     v.cell_a_id,
                     v.cell_b_id,
                     format_number(v.freq_a),
@@ -307,6 +360,14 @@ class SingleRunResultWidget(QWidget):
                     format_number(v.ho_count) if v.ho_count is not None else "—",
                     format_number(v.weighted_cost),
                 ])
+                if is_inh:
+                    child.setForeground(1, QBrush(QColor("#38bdf8")))
+                else:
+                    child.setForeground(1, QBrush(QColor("#f472b6")))
+                    f_mod = child.font(1)
+                    f_mod.setBold(True)
+                    child.setFont(1, f_mod)
+
                 group_item.addChild(child)
 
             self.viol_tree.addTopLevelItem(group_item)
@@ -320,7 +381,7 @@ from matplotlib.ticker import FuncFormatter
 
 
 class ConvergenceTabWidget(QWidget):
-    """Widget displaying the final convergence history curves of all runs."""
+    """Widget displaying the final convergence history curves of all runs in a single unified plot."""
     def __init__(self, per_run_history: dict[int, list[tuple[int, float]]], parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -330,47 +391,35 @@ class ConvergenceTabWidget(QWidget):
         canvas = FigureCanvasQTAgg(fig)
         layout.addWidget(canvas)
 
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_facecolor("#0c1017")
         num_runs = len(per_run_history)
-        if num_runs == 1:
-            rows, cols = 1, 1
-        elif num_runs == 2:
-            rows, cols = 1, 2
-        elif num_runs == 3:
-            rows, cols = 1, 3
-        elif num_runs <= 4:
-            rows, cols = 2, 2
-        elif num_runs <= 6:
-            rows, cols = 2, 3
-        else:
-            cols = 3
-            rows = (num_runs + cols - 1) // cols
+        title_text = "Comparación de Convergencia por Ejecución (Iteración vs Coste)" if num_runs > 1 else "Convergencia de la Optimización (Iteración vs Coste)"
+        ax.set_title(title_text, color="#f0f4f8", fontsize=12, fontweight="bold", pad=10)
+        ax.set_xlabel("Iteración / Generación", color="#8b9bb4", fontsize=10, labelpad=6)
+        ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10, labelpad=6)
+        ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
+        ax.tick_params(colors="#8b9bb4", labelsize=9)
+        for spine in ax.spines.values():
+            spine.set_color("#2b384e")
 
-        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308"]
         formatter = FuncFormatter(lambda val, _: format_number(val))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
 
-        for idx, (run_idx, hist) in enumerate(sorted(per_run_history.items())):
-            ax = fig.add_subplot(rows, cols, idx + 1)
-            ax.set_facecolor("#0c1017")
-            ax.set_title(f"Ejecución {run_idx}" if num_runs > 1 else "Convergencia de la Optimización",
-                         color="#f0f4f8", fontsize=11, fontweight="bold", pad=8)
-            ax.set_xlabel("Iteración", color="#8b9bb4", fontsize=10)
-            ax.set_ylabel("Coste (Score)", color="#8b9bb4", fontsize=10)
-            ax.grid(True, linestyle="--", alpha=0.3, color="#2b384e")
-            ax.tick_params(colors="#8b9bb4", labelsize=9)
-            for spine in ax.spines.values():
-                spine.set_color("#2b384e")
-            ax.xaxis.set_major_formatter(formatter)
-            ax.yaxis.set_major_formatter(formatter)
+        colors = ["#00d4aa", "#38bdf8", "#fb923c", "#a855f7", "#f43f5e", "#10b981", "#eab308", "#ec4899", "#6366f1"]
 
+        for run_idx, hist in sorted(per_run_history.items()):
             c = colors[(run_idx - 1) % len(colors)]
             xs = [h[0] for h in hist]
             ys = [h[1] for h in hist]
-            ax.plot(xs, ys, color=c, linewidth=2.0, marker="o", markersize=3, label=f"Ejec. {run_idx}")
-            if ys:
-                min_y = min(ys)
-                ax.axhline(min_y, color="#eab308", linestyle=":", alpha=0.6, label=f"Mínimo: {format_number(min_y)}")
-            ax.legend(facecolor="#16213e", edgecolor="#2b384e", labelcolor="#f0f4f8", fontsize=8)
+            min_y = min(ys) if ys else 0
+            ax.plot(
+                xs, ys, color=c, linewidth=2.2, marker="o", markersize=3.5,
+                label=f"Ejecución {run_idx} (Mín: {format_number(min_y)})"
+            )
 
+        ax.legend(facecolor="#16213e", edgecolor="#2b384e", labelcolor="#f0f4f8", fontsize=9, loc="upper right")
         fig.tight_layout(pad=2.0)
         canvas.draw_idle()
 
@@ -384,6 +433,7 @@ class ResultComparisonWidget(QWidget):
         super().__init__(parent)
         self._results: list[PlanResult] = []
         self._cells: dict[str, Cell] = {}
+        self._baseline: Optional[PlanResult] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -406,7 +456,7 @@ class ResultComparisonWidget(QWidget):
         self.btn_export.setEnabled(False)
         header_layout.addWidget(self.btn_export)
 
-        self.btn_export_html = QPushButton("🌐 Exportar Informe HTML Dinámico (3 Escenarios)")
+        self.btn_export_html = QPushButton("🌐 Exportar Informe HTML Dinámico (Escenarios)")
         self.btn_export_html.setObjectName("btn_primary")
         self.btn_export_html.setStyleSheet("""
             QPushButton {
@@ -432,10 +482,22 @@ class ResultComparisonWidget(QWidget):
         self.results_tabs = QTabWidget()
         layout.addWidget(self.results_tabs, 1)
 
-    def load_results(self, results: list[PlanResult], cells: dict[str, Cell]):
+    def load_results(
+        self,
+        results: list[PlanResult],
+        cells: dict[str, Cell],
+        neighbor_graph: Optional[object] = None,
+        rules: Optional[object] = None,
+        baseline: Optional[PlanResult] = None
+    ):
         """Load results and generate sub-tabs for multi-run results."""
         self._results = results
         self._cells = cells
+
+        if baseline is None and cells and neighbor_graph and rules:
+            from src.io.html_exporter import generate_baseline_plan
+            baseline = generate_baseline_plan(cells, neighbor_graph, rules)
+        self._baseline = baseline
 
         self.results_tabs.clear()
 
@@ -453,33 +515,42 @@ class ResultComparisonWidget(QWidget):
 
         if num_runs > 1:
             self.lbl_status.setText(
-                f"{len(results)} mejores globales ({num_runs} ejecuciones realizadas)"
+                f"{len(results)} mejores opciones ({num_runs} ejecuciones realizadas)"
             )
 
-            # Master Tab: Global Best across all runs
-            global_widget = SingleRunResultWidget()
-            global_widget.load_results(results, cells)
-            global_widget.plan_selected.connect(self.plan_selected.emit)
-            self.results_tabs.addTab(global_widget, "🏆 Mejor Global (Todas las Pasadas)")
-
-            # Individual Run Tabs
+            # Master Tab: Best plan of each distinct execution
+            best_of_each_run = []
             for run_idx in sorted(per_run.keys()):
                 run_res = per_run[run_idx]
-                best = min(r.score for r in run_res) if run_res else 0.0
+                if run_res:
+                    best_run_plan = min(run_res, key=lambda r: r.score)
+                    best_of_each_run.append(best_run_plan)
+
+            best_widget = SingleRunResultWidget()
+            best_widget.load_results(best_of_each_run, cells, baseline=baseline)
+            best_widget.plan_selected.connect(self.plan_selected.emit)
+            self.results_tabs.addTab(best_widget, "🏆 Mejores de Cada Ejecución")
+
+            # Individual Run Tabs: top 5 plans of each run
+            for run_idx in sorted(per_run.keys()):
+                run_res = per_run[run_idx]
+                sorted_run_res = sorted(run_res, key=lambda r: r.score)[:5]
+                best = sorted_run_res[0].score if sorted_run_res else 0.0
                 widget = SingleRunResultWidget()
-                widget.load_results(run_res, cells)
+                widget.load_results(sorted_run_res, cells, baseline=baseline)
                 widget.plan_selected.connect(self.plan_selected.emit)
                 self.results_tabs.addTab(
-                    widget, f"Ejecución {run_idx} (Score: {format_number(best)})"
+                    widget, f"Ejecución {run_idx} (Top 5 - Score: {format_number(best)})"
                 )
         else:
-            best = min(r.score for r in results) if results else 0.0
-            self.lbl_status.setText(f"{len(results)} planes calculados — Mejor score: {format_number(best)}")
+            sorted_res = sorted(results, key=lambda r: r.score)[:5]
+            best = sorted_res[0].score if sorted_res else 0.0
+            self.lbl_status.setText(f"Top 5 planes calculados — Mejor score: {format_number(best)}")
 
             widget = SingleRunResultWidget()
-            widget.load_results(results, cells)
+            widget.load_results(sorted_res, cells, baseline=baseline)
             widget.plan_selected.connect(self.plan_selected.emit)
-            self.results_tabs.addTab(widget, "Resultados de Optimización")
+            self.results_tabs.addTab(widget, "Resultados (Top 5 Planes)")
 
         # Convergence history tab
         per_run_history = getattr(results, "per_run_history", {})

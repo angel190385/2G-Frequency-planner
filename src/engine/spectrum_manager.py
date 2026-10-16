@@ -242,8 +242,8 @@ def apply_spectrum_shift_to_cells(
         if info["bcch_affected"]:
             cell.recalculate_bcch = True
 
-        if include_all_cell_tchs and info["tch_affected_indices"]:
-            # User selected to include all TCHs of any cell with an affected TCH
+        if include_all_cell_tchs and (info["bcch_affected"] or info["tch_affected_indices"]):
+            # If any channel changes (BCCH or TCH), recalculate all TCHs of this cell
             cell.tch_indices_to_recalculate = list(range(len(cell.tch_list)))
         else:
             cell.tch_indices_to_recalculate = list(info["tch_affected_indices"])

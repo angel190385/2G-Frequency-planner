@@ -109,12 +109,57 @@ class TestMejorasMapaCalculo(unittest.TestCase):
         apply_spectrum_shift_to_cells(test_cells_1, self.neighbor_graph, self.rules, analysis_1, mode="disappeared_only", include_all_cell_tchs=False)
         self.assertEqual(test_cells_1["TEST_C1"].tch_indices_to_recalculate, [2])
 
-        # Case B: include_all_cell_tchs=True -> ALL TCH indices [0, 1, 2] should be marked
+        # Case B: include_all_cell_tchs=True with TCH affected -> ALL TCH indices [0, 1, 2] should be marked
         cell_test_2 = Cell(cell_id="TEST_C2", station=self.st1, sector="1", azimuth=0, bcch=50, tch_list=[60, 62, 75])
         test_cells_2 = {"TEST_C2": cell_test_2}
         analysis_2 = analyze_spectrum_shift(test_cells_2, initial_start=50, initial_end=75, target_start=50, target_end=70)
         apply_spectrum_shift_to_cells(test_cells_2, self.neighbor_graph, self.rules, analysis_2, mode="disappeared_only", include_all_cell_tchs=True)
         self.assertEqual(test_cells_2["TEST_C2"].tch_indices_to_recalculate, [0, 1, 2])
+
+        # Case C: include_all_cell_tchs=True with ONLY BCCH affected (BCCH 75, TCHs valid [60, 62]) -> ALL TCHs must be reviewed!
+        cell_test_3 = Cell(cell_id="TEST_C3", station=self.st1, sector="1", azimuth=0, bcch=75, tch_list=[60, 62])
+        test_cells_3 = {"TEST_C3": cell_test_3}
+        analysis_3 = analyze_spectrum_shift(test_cells_3, initial_start=50, initial_end=75, target_start=50, target_end=70)
+        apply_spectrum_shift_to_cells(test_cells_3, self.neighbor_graph, self.rules, analysis_3, mode="disappeared_only", include_all_cell_tchs=True)
+        self.assertTrue(test_cells_3["TEST_C3"].recalculate_bcch)
+        self.assertEqual(test_cells_3["TEST_C3"].tch_indices_to_recalculate, [0, 1])
+
+    def test_same_station_strict_constraints_and_repair(self):
+        """Verify hard constraints and genetic repair strictly forbid cochannel and adjacent on same site."""
+        import numpy as np
+        from src.engine.parallel import _repair_chromosome
+        from src.engine.optimizer import _Variable
+
+        # 1. Check constraints logic
+        self.assertTrue(self.rules.is_hard_constraint_violated(
+            same_station=True, is_neighbor=True, is_cochannel=True, channel_type_a="BCCH", channel_type_b="TCH"
+        ))
+        self.assertTrue(self.rules.is_hard_constraint_violated(
+            same_station=True, is_neighbor=False, is_cochannel=False, channel_type_a="TCH", channel_type_b="TCH"
+        ))
+
+        # 2. Check repair chromosome with 2 cells on the exact same site coordinates (distance = 0)
+        same_site_st = Station("SITE_X", "Site X", latitude=41.123456, longitude=-3.654321)
+        cell_a = Cell("SITE_A", same_site_st, sector="1", azimuth=0, bcch=100, tch_list=[104])
+        cell_b = Cell("SITE_B", same_site_st, sector="2", azimuth=120, bcch=110, tch_list=[114])
+        cell_a.recalculate_bcch = True
+        cell_b.recalculate_bcch = True
+
+        test_cells = {"SITE_A": cell_a, "SITE_B": cell_b}
+        variables = [
+            _Variable("SITE_A", "BCCH", -1),
+            _Variable("SITE_B", "BCCH", -1)
+        ]
+        pool = np.array([100, 101, 105, 110], dtype=np.int32)
+
+        # Force conflicting chromosome: gene 0 -> 100 (idx 0), gene 1 -> 101 (idx 1, adjacent!)
+        raw_chrom = np.array([0, 1], dtype=np.int32)
+        repaired = _repair_chromosome(raw_chrom, variables, test_cells, pool)
+
+        freq_a = pool[repaired[0]]
+        freq_b = pool[repaired[1]]
+        # Separation on the same site must be >= 2 (no cochannel and no adjacent)
+        self.assertGreaterEqual(abs(freq_a - freq_b), 2)
 
     def test_cost_decomposition_inherited_vs_new(self):
         """Test decomposition of plan cost into inherited (pre-existing) vs newly generated."""
@@ -185,6 +230,66 @@ class TestMejorasMapaCalculo(unittest.TestCase):
             self.assertIn("Preexistente", html_content)
             self.assertIn("Nueva Asignación", html_content)
             self.assertIn("filter-viol-origin", html_content)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_fast_evaluator_cost_decomposition(self):
+        """Verify FastPlanEvaluator.evaluate_matrix decomposes inherited vs new costs properly."""
+        import numpy as np
+
+        # CELL1 needs recalculation on TCH index 0 (slot col 1)
+        self.c1.tch_indices_to_recalculate = [0]
+        fe = FastPlanEvaluator(self.cells, self.neighbor_graph, self.rules)
+
+        # Base matrix has CELL1 BCCH 50, CELL2 BCCH 50 (inherited cochannel)
+        matrix = fe.base_freq_matrix.copy()
+        # Change CELL1 TCH from 60 to 70 (new assignment that conflicts with CELL2 TCH 70)
+        c1_idx = fe.cell_to_idx["CELL1"]
+        matrix[c1_idx, 1] = 70
+
+        score, plan = fe.evaluate_matrix(matrix, collect_violations=True, plan_id=1, run_id=1)
+
+        self.assertGreater(plan.inherited_cost, 0)
+        self.assertGreater(plan.new_assignment_cost, 0)
+        self.assertAlmostEqual(plan.score, plan.inherited_cost + plan.new_assignment_cost, places=1)
+
+        # Check violation objects have is_inherited set
+        self.assertTrue(any(v.is_inherited for v in plan.violations))
+        self.assertTrue(any(not v.is_inherited for v in plan.violations))
+
+    def test_html_export_scenarios_per_execution(self):
+        """Verify HTML exporter groups plans and displays the best candidate of each execution."""
+        from src.models.frequency_plan import OptimizationResultList
+        import tempfile
+
+        # Plan 1 from Run 1 (score 200), Plan 2 from Run 1 (score 190) -> Best of Run 1 is 190
+        p1 = PlanResult(plan_id=1, run_id=1, score=200.0)
+        p2 = PlanResult(plan_id=2, run_id=1, score=190.0)
+        # Plan 3 from Run 2 (score 170), Plan 4 from Run 2 (score 180) -> Best of Run 2 is 170
+        p3 = PlanResult(plan_id=3, run_id=2, score=170.0)
+        p4 = PlanResult(plan_id=4, run_id=2, score=180.0)
+
+        for p in (p1, p2, p3, p4):
+            p.assignments = [FrequencyAssignment(cid, c.bcch or 50, list(c.tch_list)) for cid, c in self.cells.items()]
+
+        res_list = OptimizationResultList([p3, p4, p2, p1])
+        res_list.per_run = {
+            1: [p1, p2],
+            2: [p3, p4]
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+            temp_path = f.name
+
+        try:
+            export_plan_html(temp_path, self.cells, self.neighbor_graph, self.rules, res_list)
+            with open(temp_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # The scenarios extracted must be the best of Run 1 (Plan 2) and best of Run 2 (Plan 3)
+            self.assertIn("Ejecución 1", content)
+            self.assertIn("Ejecución 2", content)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)

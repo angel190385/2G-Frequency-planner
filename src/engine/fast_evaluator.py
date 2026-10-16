@@ -68,6 +68,19 @@ class FastPlanEvaluator:
         else:
             self.close_pairs_raw = []
 
+        # Track which (cell_idx, col_idx) slots were marked for recalculation
+        self.recalculated_slots: set[tuple[int, int]] = set()
+        for cid, cell in cells.items():
+            if cid not in self.cell_to_idx:
+                continue
+            c_idx = self.cell_to_idx[cid]
+            if cell.recalculate_bcch:
+                self.recalculated_slots.add((c_idx, 0))
+            for s_idx in cell.tch_indices_to_recalculate:
+                self.recalculated_slots.add((c_idx, 1 + s_idx))
+            for i in range(cell.new_tch_count):
+                self.recalculated_slots.add((c_idx, 1 + len(cell.tch_list) + i))
+
         # 2. Build indexed relation structures
         self._build_relations()
 
@@ -202,13 +215,13 @@ class FastPlanEvaluator:
                     # Adjacent weights vector
                     if is_bcch_bcch:
                         adj_w = np.where(st_filt, rules.weight_same_station_adjacent, rules.weight_adjacent_bcch_bcch)
-                        adj_hard = np.where(st_filt, not rules.allow_adjacent_same_station, not rules.allow_adjacent_bcch_bcch_neighbors)
+                        adj_hard = np.where(st_filt, True, not rules.allow_adjacent_bcch_bcch_neighbors)
                     elif is_bcch_tch:
                         adj_w = np.where(st_filt, rules.weight_same_station_adjacent, rules.weight_adjacent_bcch_tch)
-                        adj_hard = np.where(st_filt, not rules.allow_adjacent_same_station, not rules.allow_adjacent_bcch_tch_neighbors)
+                        adj_hard = np.where(st_filt, True, not rules.allow_adjacent_bcch_tch_neighbors)
                     else:
                         adj_w = np.where(st_filt, rules.weight_same_station_adjacent, rules.weight_adjacent_tch_tch)
-                        adj_hard = np.where(st_filt, not rules.allow_adjacent_same_station, not rules.allow_adjacent_tch_tch_neighbors)
+                        adj_hard = np.where(st_filt, True, not rules.allow_adjacent_tch_tch_neighbors)
 
                     cost_adj_vec = (adj_w + np.where(adj_hard, HARD_PENALTY, 0.0)) * hw_filt
 
@@ -242,8 +255,7 @@ class FastPlanEvaluator:
                     is_bcch_tch = ((col_a == 0 and col_b > 0) or (col_a > 0 and col_b == 0))
 
                     cost_cochan_val = rules.weight_same_station_cochannel + HARD_PENALTY
-                    adj_hard = not rules.allow_adjacent_same_station
-                    cost_adj_val = rules.weight_same_station_adjacent + (HARD_PENALTY if adj_hard else 0.0)
+                    cost_adj_val = rules.weight_same_station_adjacent + HARD_PENALTY
 
                     self.slot_pairs_same_st.append({
                         "col_a": col_a,
@@ -356,6 +368,8 @@ class FastPlanEvaluator:
 
         rules = self.rules
         total_score = 0.0
+        inherited_cost = 0.0
+        new_assignment_cost = 0.0
 
         result = PlanResult(plan_id=plan_id, run_id=run_id)
         violations = []
@@ -399,9 +413,20 @@ class FastPlanEvaluator:
                 if is_st:
                     result.same_station_cochannel += 1
 
+                ai = a_filt[idx_k]
+                bi = b_filt[idx_k]
+                is_a_new = ((ai, col_a) in self.recalculated_slots) or (int(fa[idx_k]) != int(self.base_freq_matrix[ai, col_a]))
+                is_b_new = ((bi, col_b) in self.recalculated_slots) or (int(fb[idx_k]) != int(self.base_freq_matrix[bi, col_b]))
+                is_inh = not (is_a_new or is_b_new)
+
+                if is_inh:
+                    inherited_cost += c_val
+                else:
+                    new_assignment_cost += c_val
+
                 violations.append(Violation(
-                    cell_a_id=self.cell_ids[a_filt[idx_k]],
-                    cell_b_id=self.cell_ids[b_filt[idx_k]],
+                    cell_a_id=self.cell_ids[ai],
+                    cell_b_id=self.cell_ids[bi],
                     freq_a=int(fa[idx_k]),
                     freq_b=int(fb[idx_k]),
                     violation_type="cochannel",
@@ -409,7 +434,8 @@ class FastPlanEvaluator:
                     channel_type_b=type_b,
                     ho_count=int(self.raw_rel_ho_count[orig_i]) if self.raw_rel_ho_count[orig_i] >= 0 else None,
                     distance_km=float(self.raw_rel_dist[orig_i]),
-                    weighted_cost=c_val
+                    weighted_cost=c_val,
+                    is_inherited=is_inh
                 ))
 
             for idx_k in np.where(is_adj)[0]:
@@ -429,9 +455,20 @@ class FastPlanEvaluator:
                 if is_st:
                     result.same_station_adjacent += 1
 
+                ai = a_filt[idx_k]
+                bi = b_filt[idx_k]
+                is_a_new = ((ai, col_a) in self.recalculated_slots) or (int(fa[idx_k]) != int(self.base_freq_matrix[ai, col_a]))
+                is_b_new = ((bi, col_b) in self.recalculated_slots) or (int(fb[idx_k]) != int(self.base_freq_matrix[bi, col_b]))
+                is_inh = not (is_a_new or is_b_new)
+
+                if is_inh:
+                    inherited_cost += c_val
+                else:
+                    new_assignment_cost += c_val
+
                 violations.append(Violation(
-                    cell_a_id=self.cell_ids[a_filt[idx_k]],
-                    cell_b_id=self.cell_ids[b_filt[idx_k]],
+                    cell_a_id=self.cell_ids[ai],
+                    cell_b_id=self.cell_ids[bi],
                     freq_a=int(fa[idx_k]),
                     freq_b=int(fb[idx_k]),
                     violation_type="adjacent",
@@ -439,7 +476,8 @@ class FastPlanEvaluator:
                     channel_type_b=type_b,
                     ho_count=int(self.raw_rel_ho_count[orig_i]) if self.raw_rel_ho_count[orig_i] >= 0 else None,
                     distance_km=float(self.raw_rel_dist[orig_i]),
-                    weighted_cost=c_val
+                    weighted_cost=c_val,
+                    is_inherited=is_inh
                 ))
 
         # ── 2. Same-station non-neighbors ─────────────────────────
@@ -468,9 +506,21 @@ class FastPlanEvaluator:
                     result.cochannel_bcch_tch += 1
                 else:
                     result.cochannel_tch_tch += 1
+
+                ai = sa_filt[idx_k]
+                bi = sb_filt[idx_k]
+                is_a_new = ((ai, col_a) in self.recalculated_slots) or (int(fa[idx_k]) != int(self.base_freq_matrix[ai, col_a]))
+                is_b_new = ((bi, col_b) in self.recalculated_slots) or (int(fb[idx_k]) != int(self.base_freq_matrix[bi, col_b]))
+                is_inh = not (is_a_new or is_b_new)
+
+                if is_inh:
+                    inherited_cost += c_val
+                else:
+                    new_assignment_cost += c_val
+
                 violations.append(Violation(
-                    cell_a_id=self.cell_ids[sa_filt[idx_k]],
-                    cell_b_id=self.cell_ids[sb_filt[idx_k]],
+                    cell_a_id=self.cell_ids[ai],
+                    cell_b_id=self.cell_ids[bi],
                     freq_a=int(fa[idx_k]),
                     freq_b=int(fb[idx_k]),
                     violation_type="cochannel",
@@ -478,7 +528,8 @@ class FastPlanEvaluator:
                     channel_type_b=type_b,
                     ho_count=None,
                     distance_km=0.0,
-                    weighted_cost=c_val
+                    weighted_cost=c_val,
+                    is_inherited=is_inh
                 ))
 
             for idx_k in np.where(diff == 1)[0]:
@@ -491,9 +542,21 @@ class FastPlanEvaluator:
                     result.adjacent_bcch_tch += 1
                 else:
                     result.adjacent_tch_tch += 1
+
+                ai = sa_filt[idx_k]
+                bi = sb_filt[idx_k]
+                is_a_new = ((ai, col_a) in self.recalculated_slots) or (int(fa[idx_k]) != int(self.base_freq_matrix[ai, col_a]))
+                is_b_new = ((bi, col_b) in self.recalculated_slots) or (int(fb[idx_k]) != int(self.base_freq_matrix[bi, col_b]))
+                is_inh = not (is_a_new or is_b_new)
+
+                if is_inh:
+                    inherited_cost += c_val
+                else:
+                    new_assignment_cost += c_val
+
                 violations.append(Violation(
-                    cell_a_id=self.cell_ids[sa_filt[idx_k]],
-                    cell_b_id=self.cell_ids[sb_filt[idx_k]],
+                    cell_a_id=self.cell_ids[ai],
+                    cell_b_id=self.cell_ids[bi],
                     freq_a=int(fa[idx_k]),
                     freq_b=int(fb[idx_k]),
                     violation_type="adjacent",
@@ -501,7 +564,8 @@ class FastPlanEvaluator:
                     channel_type_b=type_b,
                     ho_count=None,
                     distance_km=0.0,
-                    weighted_cost=c_val
+                    weighted_cost=c_val,
+                    is_inherited=is_inh
                 ))
 
         # ── 3. Internal cell separation check ───────────────────────
@@ -522,6 +586,16 @@ class FastPlanEvaluator:
                     result.cochannel_bcch_tch += 1
                 else:
                     result.cochannel_tch_tch += 1
+
+                is_i_new = ((c_idx, sp["i"]) in self.recalculated_slots) or (int(fi[k]) != int(self.base_freq_matrix[c_idx, sp["i"]]))
+                is_j_new = ((c_idx, sp["j"]) in self.recalculated_slots) or (int(fj[k]) != int(self.base_freq_matrix[c_idx, sp["j"]]))
+                is_inh = not (is_i_new or is_j_new)
+
+                if is_inh:
+                    inherited_cost += HARD_PENALTY
+                else:
+                    new_assignment_cost += HARD_PENALTY
+
                 violations.append(Violation(
                     cell_a_id=cid,
                     cell_b_id=cid,
@@ -532,12 +606,21 @@ class FastPlanEvaluator:
                     channel_type_b=t_j,
                     ho_count=None,
                     distance_km=0.0,
-                    weighted_cost=HARD_PENALTY
+                    weighted_cost=HARD_PENALTY,
+                    is_inherited=is_inh
                 ))
 
             for k in np.where((diff > 0) & (diff < rules.min_separation_same_cell))[0]:
                 penalty = rules.weight_same_station_adjacent * 2
                 total_score += penalty
+                c_idx = c_idxs[k]
+                is_i_new = ((c_idx, sp["i"]) in self.recalculated_slots) or (int(fi[k]) != int(self.base_freq_matrix[c_idx, sp["i"]]))
+                is_j_new = ((c_idx, sp["j"]) in self.recalculated_slots) or (int(fj[k]) != int(self.base_freq_matrix[c_idx, sp["j"]]))
+                is_inh = not (is_i_new or is_j_new)
+                if is_inh:
+                    inherited_cost += penalty
+                else:
+                    new_assignment_cost += penalty
 
         # ── 4. Distance penalty for close pairs ─────────────────────
         if rules.enable_distance_penalty and len(self.close_a) > 0:
@@ -557,9 +640,31 @@ class FastPlanEvaluator:
 
             has_co = cochan_count > 0
             if np.any(has_co):
-                total_score += np.sum(rules.weight_distance * dp[has_co] * cochan_count[has_co])
+                dist_penalties = rules.weight_distance * dp[has_co] * cochan_count[has_co]
+                total_score += np.sum(dist_penalties)
+
+                # Attribute distance penalty
+                for idx_p, p_val in zip(np.where(has_co)[0], dist_penalties):
+                    ca_idx = ca[idx_p]
+                    cb_idx = cb[idx_p]
+                    is_inh_p = True
+                    for col_a in range(1 + self.max_tch):
+                        for col_b in range(1 + self.max_tch):
+                            if self.slot_mask[ca_idx, col_a] and self.slot_mask[cb_idx, col_b]:
+                                if freq_matrix[ca_idx, col_a] == freq_matrix[cb_idx, col_b]:
+                                    is_a_n = ((ca_idx, col_a) in self.recalculated_slots) or (int(freq_matrix[ca_idx, col_a]) != int(self.base_freq_matrix[ca_idx, col_a]))
+                                    is_b_n = ((cb_idx, col_b) in self.recalculated_slots) or (int(freq_matrix[cb_idx, col_b]) != int(self.base_freq_matrix[cb_idx, col_b]))
+                                    if is_a_n or is_b_n:
+                                        is_inh_p = False
+                                        break
+                    if is_inh_p:
+                        inherited_cost += float(p_val)
+                    else:
+                        new_assignment_cost += float(p_val)
 
         result.score = total_score
+        result.inherited_cost = float(inherited_cost)
+        result.new_assignment_cost = float(new_assignment_cost)
         result.violations = violations
 
         # Populate assignments

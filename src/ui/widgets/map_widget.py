@@ -37,6 +37,9 @@ class MapWidget(QWidget):
         super().__init__(parent)
         self.cells: dict[str, Cell] = {}
         self.results: list[PlanResult] = []
+        self.neighbor_graph = None
+        self.rules = None
+        self.baseline_plan: Optional[PlanResult] = None
         self.current_plan_idx: int = -1  # -1 = Original, 0..N = Plan 1..N
 
         self._setup_ui()
@@ -93,7 +96,7 @@ class MapWidget(QWidget):
         row2 = QHBoxLayout()
         row2.setSpacing(14)
 
-        # Viewport Filtering Toggle (Requirement 1)
+        # Viewport Filtering Toggle
         self.chk_viewport_filter = QCheckBox("👁️ Filtrar líneas a la vista actual")
         self.chk_viewport_filter.setChecked(True)
         self.chk_viewport_filter.setToolTip(
@@ -102,12 +105,22 @@ class MapWidget(QWidget):
         self.chk_viewport_filter.toggled.connect(self._on_viewport_filter_toggled)
         row2.addWidget(self.chk_viewport_filter)
 
-        # Only Modified Cells Toggle (Requirement 1)
+        # Only Modified Cells Toggle
         self.chk_only_modified = QCheckBox("🔄 Solo celdas modificadas")
         self.chk_only_modified.setChecked(False)
         self.chk_only_modified.setToolTip("Muestra únicamente las celdas cuyas frecuencias han sido modificadas por el optimizador")
         self.chk_only_modified.toggled.connect(self._on_filter_changed)
         row2.addWidget(self.chk_only_modified)
+
+        # Isolate Cell Checkbox (Requirement 5)
+        self.chk_isolate_cell = QCheckBox("🎯 Aislar celda y colorear conflictos")
+        self.chk_isolate_cell.setChecked(False)
+        self.chk_isolate_cell.setToolTip(
+            "Al seleccionar una celda, aísla su visualización sombreando el resto del mapa, "
+            "oculta líneas de conflicto ajenas y colorea las celdas en conflicto con ella (Rojo = Cocanal, Naranja = Adyacente)"
+        )
+        self.chk_isolate_cell.toggled.connect(self._on_isolate_cell_toggled)
+        row2.addWidget(self.chk_isolate_cell)
 
         row2.addStretch()
 
@@ -244,7 +257,7 @@ class MapWidget(QWidget):
         }}
 
         // Draw sector wedge (quesito)
-        function drawSector(lat, lon, azimuth, beamWidth, radiusMeters, color, cellData) {{
+        function drawSector(lat, lon, azimuth, beamWidth, radiusMeters, fillColor, strokeColor, fillOpacity, strokeWeight, cellData) {{
             var points = [[lat, lon]];
             var halfWidth = beamWidth / 2;
             var startAngle = azimuth - halfWidth;
@@ -260,16 +273,16 @@ class MapWidget(QWidget):
 
             var isMod = !!cellData.is_modified;
             var polygon = L.polygon(points, {{
-                color: isMod ? '#ff007f' : color,
-                fillColor: color,
-                fillOpacity: isMod ? 0.7 : 0.5,
-                weight: isMod ? 3.5 : 2,
-                dashArray: isMod ? '4, 4' : null
+                color: strokeColor,
+                fillColor: fillColor,
+                fillOpacity: fillOpacity,
+                weight: strokeWeight,
+                dashArray: (isMod && strokeColor === '#ff007f') ? '4, 4' : null
             }});
 
             var popupContent = '<div class="sector-popup">';
             if (isMod) {{
-                popupContent += '<div class="badge-modified">✨ MODIFICADA POR OPTIMIZADOR</div><br/>';
+                popupContent += '<div class="badge-modified">✨ Modificada</div><br/>';
             }}
             popupContent += '<h3>📡 ' + escapeHtml(cellData.cell_id) + '</h3>' +
                 '<b>Estación:</b> ' + escapeHtml(cellData.station_name) + '<br/>' +
@@ -312,11 +325,11 @@ class MapWidget(QWidget):
         // Draw line connecting conflict cells
         function drawConflictLine(lat1, lon1, lat2, lon2, type, text) {{
             var isCo = (type === 'cochannel');
-            var color = isCo ? '#e74c3c' : '#f39c12';
+            var color = isCo ? '#ef4444' : '#f97316';
             var line = L.polyline([[lat1, lon1], [lat2, lon2]], {{
                 color: color,
-                weight: isCo ? 3 : 2,
-                opacity: 0.85,
+                weight: isCo ? 3.5 : 2.5,
+                opacity: 0.9,
                 dashArray: isCo ? null : '6, 6'
             }});
 
@@ -330,8 +343,12 @@ class MapWidget(QWidget):
 
             var bounds = map.getBounds();
             allConflicts.forEach(function(cf) {{
-                var isFocusedLine = (focusedCellId && (cf.cell_a_id === focusedCellId || cf.cell_b_id === focusedCellId));
-                if (viewportFiltering && !isFocusedLine) {{
+                var isLineForFocused = (focusedCellId && (cf.cell_a_id === focusedCellId || cf.cell_b_id === focusedCellId));
+                if (isolateCellMode && focusedCellId) {{
+                    if (!isLineForFocused) {{
+                        return; // Ocultar líneas que no sean de la celda aislada
+                    }}
+                }} else if (viewportFiltering && !isLineForFocused) {{
                     var in1 = bounds.contains([cf.lat1, cf.lon1]);
                     var in2 = bounds.contains([cf.lat2, cf.lon2]);
                     if (!in1 || !in2) {{
@@ -370,7 +387,7 @@ class MapWidget(QWidget):
         }}
 
         map.on('moveend', function() {{
-            if (viewportFiltering) {{
+            if (viewportFiltering && !isolateCellMode) {{
                 renderConflicts();
             }}
         }});
@@ -381,14 +398,65 @@ class MapWidget(QWidget):
             cellLayers = {{}};
             allConflicts = data.conflicts || [];
             viewportFiltering = (data.viewport_filter !== undefined) ? data.viewport_filter : true;
+            isolateCellMode = !!data.isolate_cell;
             focusedCellId = data.focused_cell_id || null;
             window.totalCellsCount = (data.cells ? data.cells.length : 0);
+
+            // Compute conflict relationship with focusedCellId
+            var conflictsWithFocused = {{}}; // cell_id -> 'cochannel' | 'adjacent'
+            if (isolateCellMode && focusedCellId && allConflicts) {{
+                allConflicts.forEach(function(cf) {{
+                    var other = null;
+                    if (cf.cell_a_id === focusedCellId) other = cf.cell_b_id;
+                    else if (cf.cell_b_id === focusedCellId) other = cf.cell_a_id;
+                    if (other) {{
+                        if (cf.type === 'cochannel') {{
+                            conflictsWithFocused[other] = 'cochannel';
+                        }} else if (cf.type === 'adjacent' && conflictsWithFocused[other] !== 'cochannel') {{
+                            conflictsWithFocused[other] = 'adjacent';
+                        }}
+                    }}
+                }});
+            }}
 
             var bounds = L.latLngBounds();
 
             // Render sector pie slices (quesitos)
             data.cells.forEach(function(c) {{
-                drawSector(c.lat, c.lon, c.azimuth, 60, 220, c.color, c);
+                var isFocused = (focusedCellId && c.cell_id === focusedCellId);
+                var conflictType = conflictsWithFocused[c.cell_id];
+
+                var fillColor = c.color;
+                var strokeColor = c.is_modified ? '#ff007f' : c.color;
+                var fillOpacity = c.is_modified ? 0.7 : 0.5;
+                var strokeWeight = c.is_modified ? 3.5 : 2;
+
+                if (isolateCellMode && focusedCellId) {{
+                    if (isFocused) {{
+                        fillColor = '#38bdf8'; // Bright cyan focused
+                        strokeColor = '#ffffff';
+                        fillOpacity = 0.95;
+                        strokeWeight = 4;
+                    }} else if (conflictType === 'cochannel') {{
+                        fillColor = '#ef4444'; // Red for cochannel
+                        strokeColor = '#b91c1c';
+                        fillOpacity = 0.85;
+                        strokeWeight = 3;
+                    }} else if (conflictType === 'adjacent') {{
+                        fillColor = '#f97316'; // Orange for adjacent
+                        strokeColor = '#c2410c';
+                        fillOpacity = 0.85;
+                        strokeWeight = 3;
+                    }} else {{
+                        // Shaded / dimmed
+                        fillColor = '#334155';
+                        strokeColor = '#1e293b';
+                        fillOpacity = 0.12;
+                        strokeWeight = 1;
+                    }}
+                }}
+
+                drawSector(c.lat, c.lon, c.azimuth, 60, 220, fillColor, strokeColor, fillOpacity, strokeWeight, c);
                 bounds.extend([c.lat, c.lon]);
             }});
 
@@ -406,10 +474,21 @@ class MapWidget(QWidget):
 </html>"""
         self.web_view.setHtml(html)
 
-    def load_data(self, cells: dict[str, Cell], results: list[PlanResult] = None):
+    def load_data(
+        self,
+        cells: dict[str, Cell],
+        results: list[PlanResult] = None,
+        neighbor_graph: Optional[object] = None,
+        rules: Optional[object] = None
+    ):
         """Update map with loaded cells and plan results."""
         self.cells = cells
         self.results = results or []
+        if neighbor_graph is not None:
+            self.neighbor_graph = neighbor_graph
+        if rules is not None:
+            self.rules = rules
+        self.baseline_plan = None
 
         # Populate plan combo box
         self.combo_plan.blockSignals(True)
@@ -434,7 +513,7 @@ class MapWidget(QWidget):
 
         self.combo_plan.blockSignals(False)
 
-        # Populate cell combo box (Requirement 1)
+        # Populate cell combo box
         self.combo_cell.blockSignals(True)
         self.combo_cell.clear()
         self.combo_cell.addItem("🔍 Todas las celdas", "")
@@ -468,8 +547,14 @@ class MapWidget(QWidget):
 
     def _on_cell_selected(self):
         cid = self.combo_cell.currentData() or ""
-        js_code = f"focusCell({json.dumps(cid)});"
-        self.web_view.page().runJavaScript(js_code)
+        if self.chk_isolate_cell.isChecked():
+            self._refresh_map()
+        else:
+            js_code = f"focusCell({json.dumps(cid)});"
+            self.web_view.page().runJavaScript(js_code)
+
+    def _on_isolate_cell_toggled(self, checked: bool):
+        self._refresh_map()
 
     def _on_viewport_filter_toggled(self, checked: bool):
         js_code = f"setViewportFiltering({json.dumps(checked)});"
@@ -479,8 +564,11 @@ class MapWidget(QWidget):
         self.combo_cell.blockSignals(True)
         self.combo_cell.setCurrentIndex(0)
         self.combo_cell.blockSignals(False)
-        js_code = "focusCell('');"
-        self.web_view.page().runJavaScript(js_code)
+        if self.chk_isolate_cell.isChecked():
+            self._refresh_map()
+        else:
+            js_code = "focusCell('');"
+            self.web_view.page().runJavaScript(js_code)
 
     def _refresh_map(self):
         """Build JSON payload and trigger JS map update."""
@@ -499,7 +587,17 @@ class MapWidget(QWidget):
             for assign in plan_res.assignments:
                 assignments[assign.cell_id] = (assign.bcch, assign.tch_list)
         else:
-            plan_res = None
+            # Baseline evaluation so original conflicts are visible
+            if self.baseline_plan is None and self.cells:
+                from src.models.neighbor import NeighborGraph
+                from src.engine.constraints import FrequencyRules
+                from src.io.html_exporter import generate_baseline_plan
+
+                ng = self.neighbor_graph if self.neighbor_graph is not None else NeighborGraph()
+                ru = self.rules if self.rules is not None else FrequencyRules()
+                self.baseline_plan = generate_baseline_plan(self.cells, ng, ru)
+
+            plan_res = self.baseline_plan
             for cid, cell in self.cells.items():
                 assignments[cid] = (cell.bcch or 0, cell.tch_list)
 
@@ -590,6 +688,7 @@ class MapWidget(QWidget):
             "cells": cell_objs,
             "conflicts": conflict_objs,
             "viewport_filter": self.chk_viewport_filter.isChecked(),
+            "isolate_cell": self.chk_isolate_cell.isChecked(),
             "focused_cell_id": self.combo_cell.currentData() or None
         }
 
