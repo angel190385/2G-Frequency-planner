@@ -387,22 +387,23 @@ class ConvergenceDialog(QDialog):
 
         self.canvas.draw_idle()
 
-    def set_finished(self, best_score: Optional[float] = None, cancelled: bool = False):
+    def set_finished(self, best_score: Optional[float] = None, cancelled: bool = False, export_folder: Optional[str] = None):
         """Called when optimization completes or is stopped."""
         self.is_finished = True
         self.timer.stop()
         was_canc = cancelled or getattr(self, "_was_cancelled", False)
         total_work = self.total_runs * self.total_gens
 
+        save_note = f" (Exportado en: {export_folder})" if export_folder else ""
         if was_canc:
-            self.lbl_title.setText("⏹️ Cálculo Detenido — Resultados Parciales Rescatados")
+            self.lbl_title.setText(f"⏹️ Cálculo Detenido — Resultados Rescatados{save_note}")
             self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.WARNING};")
             curr_val = self.progress_bar.value()
             self.progress_bar.setFormat(f"Detenido en {curr_val}/{total_work} iteraciones")
         else:
             self.progress_bar.setValue(total_work)
             self.progress_bar.setFormat(f"100% ({total_work}/{total_work} iteraciones)")
-            self.lbl_title.setText("✅ Optimización Completada con Éxito")
+            self.lbl_title.setText(f"✅ Optimización Completada con Éxito{save_note}")
             self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.SUCCESS};")
 
         final_best = best_score if best_score is not None else self.global_best_score

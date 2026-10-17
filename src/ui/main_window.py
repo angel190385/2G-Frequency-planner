@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QBrush
 
 import os
+from datetime import datetime
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborGraph
 from src.models.frequency_plan import PlanResult, format_number
@@ -22,6 +23,7 @@ from src.io.data_loader import (
     load_cells, load_neighbors, load_handovers, export_results
 )
 from src.io.html_exporter import export_plan_html
+from src.io.auto_export import export_execution_bundle
 from src.ui.styles import Colors
 from src.ui.widgets.cell_table import CellTableWidget
 from src.ui.widgets.neighbor_table import NeighborTableWidget
@@ -696,6 +698,7 @@ class MainWindow(QMainWindow):
 
         # Prepare: we pass ALL cells (for context) but only some have variables
         self.btn_calculate.setEnabled(False)
+        self._calc_start_time = datetime.now()
         self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")
         self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
 
@@ -740,31 +743,57 @@ class MainWindow(QMainWindow):
         was_cancelled = getattr(self, "_was_cancelled", False)
         self._was_cancelled = False
 
+        end_time = datetime.now()
+        start_time = getattr(self, "_calc_start_time", None)
+
+        workers = getattr(self, "spin_calc_workers", None)
+        max_workers = workers.value() if workers else None
+
+        export_folder_name = None
+        if results:
+            try:
+                bundle_info = export_execution_bundle(
+                    cells=self.cells,
+                    neighbor_graph=self.neighbor_graph,
+                    rules=self.rules,
+                    results=results,
+                    start_time=start_time,
+                    end_time=end_time,
+                    was_cancelled=was_cancelled,
+                    workers_used=max_workers,
+                )
+                export_folder_name = os.path.basename(bundle_info["folder"])
+            except Exception as e:
+                import logging
+                logging.exception("Error al auto-exportar resultados de optimización: %s", e)
+
         n = len(results)
         best = min((r.score for r in results), default=0)
         clean_best = format_number(best)
 
+        save_suffix = f" | Exportado en: {export_folder_name}" if export_folder_name else ""
+
         if was_cancelled:
             self.lbl_progress.setText(
                 f"⏹️ Cálculo detenido — Mostrando {n} mejores opciones calculadas hasta el momento "
-                f"(Mejor score: {clean_best})"
+                f"(Mejor score: {clean_best}){save_suffix}"
             )
             self.lbl_progress.setStyleSheet(f"color: {Colors.WARNING}; font-weight: bold;")
             self.status_label.setText(
-                f"Cálculo cancelado: {n} planes recuperados, mejor score: {clean_best}"
+                f"Cálculo cancelado: {n} planes recuperados, mejor score: {clean_best}{save_suffix}"
             )
         else:
             self.lbl_progress.setText(
                 f"✅ Completado — {n} planes generados — "
-                f"Mejor score: {clean_best}"
+                f"Mejor score: {clean_best}{save_suffix}"
             )
             self.lbl_progress.setStyleSheet(f"color: {Colors.SUCCESS};")
             self.status_label.setText(
-                f"Optimización completada: {n} planes, mejor score: {clean_best}"
+                f"Optimización completada: {n} planes, mejor score: {clean_best}{save_suffix}"
             )
 
         if hasattr(self, "convergence_dialog") and self.convergence_dialog:
-            self.convergence_dialog.set_finished(best, cancelled=was_cancelled)
+            self.convergence_dialog.set_finished(best, cancelled=was_cancelled, export_folder=export_folder_name)
 
         # Show results
         self.result_widget.load_results(results, self.cells, self.neighbor_graph, self.rules)
