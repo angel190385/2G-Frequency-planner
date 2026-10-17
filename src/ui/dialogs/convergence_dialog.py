@@ -387,15 +387,23 @@ class ConvergenceDialog(QDialog):
 
         self.canvas.draw_idle()
 
-    def set_finished(self, best_score: Optional[float] = None):
-        """Called when optimization completes."""
+    def set_finished(self, best_score: Optional[float] = None, cancelled: bool = False):
+        """Called when optimization completes or is stopped."""
         self.is_finished = True
         self.timer.stop()
+        was_canc = cancelled or getattr(self, "_was_cancelled", False)
         total_work = self.total_runs * self.total_gens
-        self.progress_bar.setValue(total_work)
-        self.progress_bar.setFormat(f"100% ({total_work}/{total_work} iteraciones)")
-        self.lbl_title.setText("✅ Optimización Completada con Éxito")
-        self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.SUCCESS};")
+
+        if was_canc:
+            self.lbl_title.setText("⏹️ Cálculo Detenido — Resultados Parciales Rescatados")
+            self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.WARNING};")
+            curr_val = self.progress_bar.value()
+            self.progress_bar.setFormat(f"Detenido en {curr_val}/{total_work} iteraciones")
+        else:
+            self.progress_bar.setValue(total_work)
+            self.progress_bar.setFormat(f"100% ({total_work}/{total_work} iteraciones)")
+            self.lbl_title.setText("✅ Optimización Completada con Éxito")
+            self.lbl_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {Colors.SUCCESS};")
 
         final_best = best_score if best_score is not None else self.global_best_score
         clean_score = format_number(final_best) if final_best != float("inf") else "—"
@@ -408,7 +416,11 @@ class ConvergenceDialog(QDialog):
 
             if r in self.run_row_labels:
                 lbl_iter, lbl_cost = self.run_row_labels[r]
-                lbl_iter.setText(f"Iteración {self.total_gens}/{self.total_gens} (100%) — Finalizada")
+                if was_canc:
+                    lbl_iter.setText(f"{lbl_iter.text()} — Detenida")
+                else:
+                    lbl_iter.setText(f"Iteración {self.total_gens}/{self.total_gens} (100%) — Finalizada")
+
                 if r == winning_run:
                     lbl_cost.setText(f"Coste final: {format_number(r_best)} ★ (Mejor)")
                     lbl_cost.setStyleSheet(f"color: {Colors.SUCCESS}; font-size: 11px; font-weight: bold;")
@@ -418,7 +430,7 @@ class ConvergenceDialog(QDialog):
         if winning_run is not None:
             c = self.get_run_color(winning_run)
             run_text = f" (Ejecución {winning_run})" if self.total_runs > 1 else ""
-            self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}{run_text}")
+            self.lbl_best.setText(f"🏆 Score Óptimo: {clean_score}{run_text}")
             self.lbl_best.setStyleSheet(f"""
                 font-size: 13px;
                 font-weight: bold;
@@ -429,7 +441,7 @@ class ConvergenceDialog(QDialog):
                 background-color: #0c1017;
             """)
         else:
-            self.lbl_best.setText(f"🏆 Score Óptimo Global: {clean_score}")
+            self.lbl_best.setText(f"🏆 Score Óptimo: {clean_score}")
 
         # Update legend labels to show final scores and highlight winner
         if hasattr(self, "ax"):
@@ -456,6 +468,7 @@ class ConvergenceDialog(QDialog):
             self.ax.relim()
             self.ax.autoscale_view()
 
+        self.btn_action.setEnabled(True)
         self.btn_action.setText("✓ Ver Resultados y Cerrar")
         self.btn_action.setStyleSheet(f"""
             QPushButton {{
@@ -473,9 +486,10 @@ class ConvergenceDialog(QDialog):
 
     def _on_action_clicked(self):
         if not self.is_finished:
+            self._was_cancelled = True
             self.cancelled.emit()
-            self.lbl_title.setText("⛔ Cancelando cálculo...")
-            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #d63031;")
+            self.lbl_title.setText("⛔ Cancelando cálculo y recuperando resultados...")
+            self.lbl_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #fdcb6e;")
             self.btn_action.setEnabled(False)
         else:
             self.accept()

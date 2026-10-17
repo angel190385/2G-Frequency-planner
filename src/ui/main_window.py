@@ -729,8 +729,10 @@ class MainWindow(QMainWindow):
     def _cancel_calculation(self):
         """Cancel the running optimization."""
         if self._optimizer_thread:
+            self._was_cancelled = True
             self._optimizer_thread.cancel()
-            self.lbl_progress.setText("Cancelando...")
+            self.lbl_progress.setText("⏹️ Cancelando cálculo y recuperando resultados...")
+            self.lbl_progress.setStyleSheet(f"color: {Colors.WARNING}; font-weight: bold;")
 
     def _on_optimization_progress(self, run_idx, total_runs, gen, total_gens, best_score):
         """Forward progress directly to the real-time convergence dialog without jittering main window."""
@@ -743,17 +745,34 @@ class MainWindow(QMainWindow):
         self.btn_calculate.setEnabled(True)
         self.btn_cancel.setVisible(False)
 
+        was_cancelled = getattr(self, "_was_cancelled", False)
+        self._was_cancelled = False
+
         n = len(results)
         best = min((r.score for r in results), default=0)
         clean_best = format_number(best)
-        self.lbl_progress.setText(
-            f"✅ Completado — {n} planes generados — "
-            f"Mejor score: {clean_best}"
-        )
-        self.lbl_progress.setStyleSheet(f"color: {Colors.SUCCESS};")
+
+        if was_cancelled:
+            self.lbl_progress.setText(
+                f"⏹️ Cálculo detenido — Mostrando {n} mejores opciones calculadas hasta el momento "
+                f"(Mejor score: {clean_best})"
+            )
+            self.lbl_progress.setStyleSheet(f"color: {Colors.WARNING}; font-weight: bold;")
+            self.status_label.setText(
+                f"Cálculo cancelado: {n} planes recuperados, mejor score: {clean_best}"
+            )
+        else:
+            self.lbl_progress.setText(
+                f"✅ Completado — {n} planes generados — "
+                f"Mejor score: {clean_best}"
+            )
+            self.lbl_progress.setStyleSheet(f"color: {Colors.SUCCESS};")
+            self.status_label.setText(
+                f"Optimización completada: {n} planes, mejor score: {clean_best}"
+            )
 
         if hasattr(self, "convergence_dialog") and self.convergence_dialog:
-            self.convergence_dialog.set_finished(best)
+            self.convergence_dialog.set_finished(best, cancelled=was_cancelled)
 
         # Show results
         self.result_widget.load_results(results, self.cells, self.neighbor_graph, self.rules)

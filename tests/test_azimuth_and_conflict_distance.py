@@ -207,6 +207,50 @@ class TestAzimuthAndConflictDistance(unittest.TestCase):
         self.assertTrue(dist_text.endswith("km"), f"Expected distance with 'km', got '{dist_text}'")
         self.assertIn("2.45", dist_text)
 
+    def test_cancellation_preserves_best_results(self):
+        """
+        When optimization is cancelled mid-calculation, it must NOT lose results.
+        It must return the best plans found up to that instant.
+        """
+        from src.engine.optimizer import FrequencyOptimizer
+
+        # Create cells that need calculation
+        c1 = Cell("C1", self.st1, "A", azimuth=0.0, bcch=100, tch_list=[102], recalculate_bcch=True)
+        c2 = Cell("C2", self.st2, "A", azimuth=180.0, bcch=104, tch_list=[106], recalculate_bcch=True)
+        cells = {"C1": c1, "C2": c2}
+
+        graph = NeighborGraph()
+        graph.add_relation(NeighborRelation("C1", "C2", ho_count=20, distance_km=1.1))
+
+        rules = FrequencyRules(
+            freq_range_start=100,
+            freq_range_end=120,
+            population_size=40,
+            num_generations=200,
+            num_runs=2,
+            top_k_results=3
+        )
+
+        optimizer = FrequencyOptimizer(cells, graph, rules, max_workers=2)
+
+        # Trigger cancel after generation 4
+        def cancel_on_progress(*args):
+            gen = args[2] if len(args) == 5 else args[0]
+            if gen >= 4:
+                optimizer.cancel()
+
+        optimizer.progress_callback = cancel_on_progress
+        results = optimizer.optimize()
+
+        # Must have returned valid plans up to that moment
+        self.assertGreater(len(results), 0, "Cancelled optimization must preserve partial results")
+        best = results[0]
+        self.assertIsNotNone(best.score)
+        self.assertLess(best.score, float("inf"))
+        self.assertEqual(len(best.assignments), 2)
+        for a in best.assignments:
+            self.assertIn(a.bcch, range(100, 121))
+
 
 if __name__ == "__main__":
     unittest.main()

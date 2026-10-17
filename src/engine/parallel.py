@@ -297,12 +297,13 @@ def run_single_worker_run(
         final_results.append(plan)
 
     if not final_results and population:
-        mat = chrom_to_matrix(population[0])
-        score, plan = fe.evaluate_matrix(
-            mat, collect_violations=True, plan_id=1, run_id=run_idx
-        )
-        plan.convergence_history = history
-        final_results.append(plan)
+        for idx in range(min(top_k, len(population))):
+            mat = chrom_to_matrix(population[idx])
+            score, plan = fe.evaluate_matrix(
+                mat, collect_violations=True, plan_id=len(final_results) + 1, run_id=run_idx
+            )
+            plan.convergence_history = history if history else [(1, score)]
+            final_results.append(plan)
 
     # Notify completion in queue
     if queue is not None:
@@ -357,6 +358,12 @@ def run_parallel_optimizer(
 
     # If single worker: execute directly in-process
     if total_workers <= 1:
+        class _CancelEventAdapter:
+            def is_set(self):
+                return bool(cancel_check and cancel_check())
+
+        cancel_adapter = _CancelEventAdapter()
+
         for r, s, seed in tasks:
             if cancel_check and cancel_check():
                 break
@@ -375,11 +382,14 @@ def run_parallel_optimizer(
             _, run_results, history = run_single_worker_run(
                 r, cells, neighbor_graph, rules, variables_data,
                 queue=_DirectQueue(),
+                cancel_event=cancel_adapter,
                 seed=seed,
                 sub_id=s
             )
             per_run_candidates[r].extend(run_results)
             per_run_histories[r][s] = history
+            if cancel_check and cancel_check():
+                break
     else:
         # Multi-process parallel execution across all CPU cores
         import multiprocessing as mp
@@ -404,9 +414,18 @@ def run_parallel_optimizer(
         while pending_tasks and len(active_processes) < total_workers:
             _spawn_task(pending_tasks.pop(0))
 
+        cancel_requested = False
+        cancel_deadline = None
+
         while active_processes:
-            if cancel_check and cancel_check():
+            if not cancel_requested and cancel_check and cancel_check():
+                cancel_requested = True
                 cancel_event.set()
+                pending_tasks.clear()
+                # Allow active workers up to 3.0s to wrap up and deliver their best results
+                cancel_deadline = time.time() + 3.0
+
+            if cancel_requested and cancel_deadline and time.time() > cancel_deadline:
                 for p in list(active_processes.values()):
                     try:
                         p.terminate()
@@ -432,8 +451,8 @@ def run_parallel_optimizer(
                     if key in active_processes:
                         p = active_processes.pop(key)
                         p.join(timeout=0.5)
-                    # Spawn next pending task if available
-                    if pending_tasks and len(active_processes) < total_workers:
+                    # Spawn next pending task only if not cancelling
+                    if not cancel_requested and pending_tasks and len(active_processes) < total_workers:
                         _spawn_task(pending_tasks.pop(0))
                 else:
                     # Progress update: (run_idx, gen, n_gen, best_score, sub_id)
@@ -453,12 +472,26 @@ def run_parallel_optimizer(
                 for key, p in list(active_processes.items()):
                     if not p.is_alive():
                         active_processes.pop(key)
-                        if pending_tasks and len(active_processes) < total_workers:
+                        if not cancel_requested and pending_tasks and len(active_processes) < total_workers:
                             _spawn_task(pending_tasks.pop(0))
+
+        # Drain any remaining RESULT messages from queue
+        while True:
+            try:
+                msg = queue.get_nowait()
+                if msg[1] == "RESULT":
+                    r_id = msg[0]
+                    res_list = msg[2]
+                    hist = msg[3]
+                    s_id = msg[4] if len(msg) > 4 else 0
+                    per_run_candidates[r_id].extend(res_list)
+                    per_run_histories[r_id][s_id] = hist
+            except Exception:
+                break
 
         # Join any remaining processes
         for p in active_processes.values():
-            p.join(timeout=1.0)
+            p.join(timeout=0.5)
 
     # Aggregate results and histories per run
     top_k = rules.top_k_results
@@ -504,6 +537,17 @@ def run_parallel_optimizer(
             all_global_candidates.append(cand)
 
         per_run_final_results[r] = run_results
+
+    # Fallback if cancellation occurred before any generation could produce a result
+    if not all_global_candidates:
+        fe = FastPlanEvaluator(cells, neighbor_graph, rules)
+        score, plan = fe.evaluate_matrix(
+            fe.base_freq_matrix, collect_violations=True, plan_id=1, run_id=1
+        )
+        plan.convergence_history = [(1, score)]
+        all_global_candidates.append(plan)
+        per_run_final_results[1] = [plan]
+        per_run_final_history[1] = [(1, score)]
 
     # Global best aggregation across all runs
     all_global_candidates.sort(key=lambda p: p.score)
