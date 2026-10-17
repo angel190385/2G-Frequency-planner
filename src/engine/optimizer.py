@@ -65,7 +65,7 @@ class FrequencyOptimizer:
         # Precompute close cell pairs for distance penalty to avoid O(N^2) haversine calculation
         if self.rules.enable_distance_penalty:
             self.close_cell_pairs = precompute_close_cell_pairs(
-                self.cells, self.neighbor_graph, self.rules.distance_threshold_km
+                self.cells, self.neighbor_graph, self.rules.distance_threshold_km, rules=self.rules
             )
         else:
             self.close_cell_pairs = []

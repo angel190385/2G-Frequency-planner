@@ -9,11 +9,66 @@ import math
 from typing import Optional
 
 from src.models.cell import Cell
-from src.models.neighbor import NeighborGraph
+from src.models.neighbor import NeighborGraph, calculate_bearing, angle_diff
 from src.models.frequency_plan import (
     FrequencyAssignment, PlanResult, Violation
 )
 from src.engine.constraints import FrequencyRules
+
+
+def _azimuth_factor(
+    cell_a: Optional[Cell],
+    cell_b: Optional[Cell],
+    distance_km: float = 0.0,
+    rules: Optional[FrequencyRules] = None
+) -> float:
+    """
+    Directional weight factor based on sector antenna azimuths and geometric bearing.
+
+    Facing cells (enfrentadas): cells from different nearby sites whose main antenna
+    beams point towards each other incur a higher interference penalty (up to azimuth_weight_max).
+
+    Cells pointing in the same direction into different zones or divergent/back-to-back
+    sectors incur significantly lower interference risk (down to azimuth_weight_min).
+
+    If distance is 0 (colocated/same site) or cell data is missing, returns 1.0 (neutral).
+    """
+    if cell_a is None or cell_b is None:
+        return 1.0
+    if distance_km <= 0.0:
+        return 1.0
+    if not cell_a.station or not cell_b.station:
+        return 1.0
+    if cell_a.station.station_id == cell_b.station.station_id:
+        return 1.0
+
+    lat_a = cell_a.station.latitude
+    lon_a = cell_a.station.longitude
+    lat_b = cell_b.station.latitude
+    lon_b = cell_b.station.longitude
+
+    if lat_a == lat_b and lon_a == lon_b:
+        return 1.0
+
+    bearing_a_to_b = calculate_bearing(lat_a, lon_a, lat_b, lon_b)
+    bearing_b_to_a = (bearing_a_to_b + 180.0) % 360.0
+
+    # Angular deviation between antenna azimuth and line-of-sight towards the other station
+    dev_a = angle_diff(cell_a.azimuth, bearing_a_to_b)
+    dev_b = angle_diff(cell_b.azimuth, bearing_b_to_a)
+
+    # Antenna directional envelope w(dev) in [0, 1] using cosine attenuation
+    w_a = (1.0 + math.cos(math.radians(dev_a))) / 2.0
+    w_b = (1.0 + math.cos(math.radians(dev_b))) / 2.0
+
+    # Alignment coupling index:
+    # 0.6 * (product of lobes) + 0.4 * (average illumination)
+    alignment = 0.6 * (w_a * w_b) + 0.4 * ((w_a + w_b) / 2.0)
+
+    min_w = getattr(rules, "azimuth_weight_min", 0.3) if rules else 0.3
+    max_w = getattr(rules, "azimuth_weight_max", 1.8) if rules else 1.8
+
+    return min_w + (max_w - min_w) * alignment
 
 
 def _distance_factor(distance_km: float, decay: float = 0.3) -> float:
@@ -118,7 +173,8 @@ def _get_freq_pairs(
 def precompute_close_cell_pairs(
     cells: dict[str, Cell],
     neighbor_graph: NeighborGraph,
-    threshold_km: float
+    threshold_km: float,
+    rules: Optional[FrequencyRules] = None
 ) -> list[tuple[str, str, float]]:
     """
     Precompute non-neighbor, different-station cell pairs within threshold_km.
@@ -176,10 +232,13 @@ def precompute_close_cell_pairs(
 
                 dp = _distance_penalty(dist, threshold_km)
                 for ca_id in station_cells[sid_a]:
+                    cell_a = cells.get(ca_id)
                     for cb_id in station_cells[sid_b]:
                         pair_key = tuple(sorted((ca_id, cb_id)))
                         if pair_key not in neighbor_pairs:
-                            close_cell_pairs.append((ca_id, cb_id, dp))
+                            cell_b = cells.get(cb_id)
+                            az_f = _azimuth_factor(cell_a, cell_b, dist, rules=rules) if (rules and getattr(rules, "enable_azimuth_weight", True)) else 1.0
+                            close_cell_pairs.append((ca_id, cb_id, dp * az_f))
 
     return close_cell_pairs
 
@@ -242,7 +301,8 @@ def evaluate_plan(
 
         dist_f = _distance_factor(relation.distance_km, decay=decay)
         ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
-        rel_multiplier = 2.0 if same_station else (dist_f * neighbor_mult * ho_w)
+        az_f = _azimuth_factor(cell_a, cell_b, relation.distance_km, rules=rules) if getattr(rules, "enable_azimuth_weight", True) else 1.0
+        rel_multiplier = 2.0 if same_station else (dist_f * neighbor_mult * ho_w * az_f)
 
         for freq_a, type_a, freq_b, type_b in _get_freq_pairs(a_assign, b_assign):
             diff = abs(freq_a - freq_b)
@@ -467,7 +527,7 @@ def evaluate_plan(
     if rules.enable_distance_penalty:
         close_pairs = precomputed_close_pairs
         if close_pairs is None:
-            close_pairs = precompute_close_cell_pairs(cells, neighbor_graph, rules.distance_threshold_km)
+            close_pairs = precompute_close_cell_pairs(cells, neighbor_graph, rules.distance_threshold_km, rules=rules)
 
         for ca_id, cb_id, dp in close_pairs:
             a_assign = assignments.get(ca_id)

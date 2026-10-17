@@ -85,7 +85,7 @@ class SingleRunResultWidget(QWidget):
         self.viol_tree.setAlternatingRowColors(True)
         self.viol_tree.setHeaderLabels([
             "Tipo", "Origen / Estado", "Celda A", "Celda B", "Freq A", "Freq B",
-            "HO", "Coste"
+            "HO", "Coste", "Distancia"
         ])
         self.viol_tree.header().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
@@ -349,6 +349,7 @@ class SingleRunResultWidget(QWidget):
                         is_inh = True
 
                 origin_text = "📌 Preexistente" if is_inh else "✨ Modificada"
+                dist_str = f"{format_number(v.distance_km)} km" if v.distance_km > 0 else "0 km"
 
                 child = QTreeWidgetItem([
                     f"{v.channel_type_a}-{v.channel_type_b}",
@@ -359,7 +360,11 @@ class SingleRunResultWidget(QWidget):
                     format_number(v.freq_b),
                     format_number(v.ho_count) if v.ho_count is not None else "—",
                     format_number(v.weighted_cost),
+                    dist_str,
                 ])
+                for col_idx in (4, 5, 6, 7, 8):
+                    child.setTextAlignment(col_idx, Qt.AlignmentFlag.AlignCenter)
+
                 if is_inh:
                     child.setForeground(1, QBrush(QColor("#38bdf8")))
                 else:

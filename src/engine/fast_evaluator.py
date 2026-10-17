@@ -12,7 +12,9 @@ from src.models.cell import Cell
 from src.models.neighbor import NeighborGraph
 from src.models.frequency_plan import FrequencyAssignment, PlanResult, Violation
 from src.engine.constraints import FrequencyRules
-from src.engine.cost_function import _ho_weight, _distance_factor, _distance_penalty, precompute_close_cell_pairs
+from src.engine.cost_function import (
+    _ho_weight, _distance_factor, _distance_penalty, _azimuth_factor, precompute_close_cell_pairs
+)
 
 HARD_PENALTY: float = 10_000_000.0
 
@@ -61,7 +63,7 @@ class FastPlanEvaluator:
         if rules.enable_distance_penalty:
             if precomputed_close_pairs is None:
                 self.close_pairs_raw = precompute_close_cell_pairs(
-                    cells, neighbor_graph, rules.distance_threshold_km
+                    cells, neighbor_graph, rules.distance_threshold_km, rules=rules
                 )
             else:
                 self.close_pairs_raw = precomputed_close_pairs
@@ -125,7 +127,8 @@ class FastPlanEvaluator:
             neighbor_mult = getattr(rules, "weight_neighbor_factor", 1.3)
             dist_f = _distance_factor(relation.distance_km, decay=decay)
             ho_w = _ho_weight(relation.ho_count, model=ho_model, stats=ho_stats)
-            rel_mult = 2.0 if same_st else (dist_f * neighbor_mult * ho_w)
+            az_f = _azimuth_factor(cell_a, cell_b, relation.distance_km, rules=rules) if getattr(rules, "enable_azimuth_weight", True) else 1.0
+            rel_mult = 2.0 if same_st else (dist_f * neighbor_mult * ho_w * az_f)
 
             rel_a_list.append(idx_a)
             rel_b_list.append(idx_b)

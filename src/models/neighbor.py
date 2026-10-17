@@ -59,6 +59,34 @@ def haversine_distance(lat1: float, lon1: float,
     return R * c
 
 
+def calculate_bearing(lat1: float, lon1: float,
+                      lat2: float, lon2: float) -> float:
+    """
+    Calculate the initial bearing (forward azimuth) from point 1 to point 2
+    in degrees in [0, 360).
+    """
+    if lat1 == lat2 and lon1 == lon2:
+        return 0.0
+
+    lat1_r = math.radians(lat1)
+    lat2_r = math.radians(lat2)
+    dlon_r = math.radians(lon2 - lon1)
+
+    y = math.sin(dlon_r) * math.cos(lat2_r)
+    x = (math.cos(lat1_r) * math.sin(lat2_r) -
+         math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dlon_r))
+
+    bearing = math.degrees(math.atan2(y, x))
+    return (bearing + 360.0) % 360.0
+
+
+def angle_diff(angle1: float, angle2: float) -> float:
+    """
+    Calculate the shortest angular difference in degrees between two angles in [0, 180].
+    """
+    return abs((angle1 - angle2 + 180.0) % 360.0 - 180.0)
+
+
 class NeighborGraph:
     """
     Manages the complete set of neighbor relations and provides

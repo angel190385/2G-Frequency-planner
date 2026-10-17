@@ -213,6 +213,38 @@ class RulesDialog(QDialog):
         dist_layout.addWidget(self.spin_dist_weight, 2, 1)
 
         weights_layout.addWidget(dist_group)
+
+        # Azimuth / Orientation Weighting
+        azimuth_group = QGroupBox("Orientación y Azimut de Celdas")
+        az_layout = QGridLayout(azimuth_group)
+
+        self.chk_azimuth_weight = QCheckBox("Ponderar coste según el azimut y enfrentamiento de celdas")
+        self.chk_azimuth_weight.setToolTip("Penaliza con mayor fuerza celdas de estaciones cercanas enfrentadas entre sí y reduce el peso para celdas con la misma orientación que apuntan a zonas distintas")
+        az_layout.addWidget(self.chk_azimuth_weight, 0, 0, 1, 2)
+
+        az_layout.addWidget(QLabel("Multiplicador celdas enfrentadas (máx):"), 1, 0)
+        self.spin_azimuth_max = QDoubleSpinBox()
+        self.spin_azimuth_max.setRange(1.0, 5.0)
+        self.spin_azimuth_max.setDecimals(1)
+        self.spin_azimuth_max.setSingleStep(0.1)
+        az_layout.addWidget(self.spin_azimuth_max, 1, 1)
+
+        az_layout.addWidget(QLabel("Multiplicador celdas divergentes / opuestas (mín):"), 2, 0)
+        self.spin_azimuth_min = QDoubleSpinBox()
+        self.spin_azimuth_min.setRange(0.0, 1.0)
+        self.spin_azimuth_min.setDecimals(1)
+        self.spin_azimuth_min.setSingleStep(0.05)
+        az_layout.addWidget(self.spin_azimuth_min, 2, 1)
+
+        lbl_az_note = QLabel(
+            "💡 Diferencia celdas de emplazamientos cercanos enfrentadas (mayor interferencia) "
+            "frente a celdas que apuntan a zonas distintas o divergentes."
+        )
+        lbl_az_note.setObjectName("label_subtitle")
+        lbl_az_note.setWordWrap(True)
+        az_layout.addWidget(lbl_az_note, 3, 0, 1, 2)
+
+        weights_layout.addWidget(azimuth_group)
         weights_layout.addStretch()
 
         tabs.addTab(self._wrap_tab_in_scroll(weights_tab), "⚖️ Pesos & Estadísticas")
@@ -399,6 +431,11 @@ class RulesDialog(QDialog):
         self.spin_dist_threshold.setValue(r.distance_threshold_km)
         self.spin_dist_weight.setValue(r.weight_distance)
 
+        # Azimuth weighting
+        self.chk_azimuth_weight.setChecked(getattr(r, "enable_azimuth_weight", True))
+        self.spin_azimuth_max.setValue(getattr(r, "azimuth_weight_max", 1.8))
+        self.spin_azimuth_min.setValue(getattr(r, "azimuth_weight_min", 0.3))
+
         # Frequency range
         self.spin_freq_start.setValue(r.freq_range_start)
         self.spin_freq_end.setValue(r.freq_range_end)
@@ -520,6 +557,11 @@ class RulesDialog(QDialog):
         r.enable_distance_penalty = self.chk_distance.isChecked()
         r.distance_threshold_km = self.spin_dist_threshold.value()
         r.weight_distance = self.spin_dist_weight.value()
+
+        # Azimuth weighting
+        r.enable_azimuth_weight = self.chk_azimuth_weight.isChecked()
+        r.azimuth_weight_max = self.spin_azimuth_max.value()
+        r.azimuth_weight_min = self.spin_azimuth_min.value()
 
         # Frequency range
         r.freq_range_start = self.spin_freq_start.value()

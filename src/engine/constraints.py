@@ -102,6 +102,11 @@ class FrequencyRules:
     distance_threshold_km: float = 6.0
     weight_distance: float = 25.0
 
+    # ── Azimuth & Sector Orientation ──────────────────────────────────
+    enable_azimuth_weight: bool = True
+    azimuth_weight_min: float = 0.3         # Weight multiplier for back-to-back / divergent cells
+    azimuth_weight_max: float = 1.8         # Weight multiplier for directly facing cells
+
     # ── Algorithm parameters ──────────────────────────────────────────
     population_size: int = 200
     num_generations: int = 500
@@ -214,6 +219,9 @@ class FrequencyRules:
             "enable_distance_penalty": self.enable_distance_penalty,
             "distance_threshold_km": self.distance_threshold_km,
             "weight_distance": self.weight_distance,
+            "enable_azimuth_weight": self.enable_azimuth_weight,
+            "azimuth_weight_min": self.azimuth_weight_min,
+            "azimuth_weight_max": self.azimuth_weight_max,
             "population_size": self.population_size,
             "num_generations": self.num_generations,
             "crossover_rate": self.crossover_rate,
