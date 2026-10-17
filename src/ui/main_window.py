@@ -372,12 +372,6 @@ class MainWindow(QMainWindow):
         self.btn_calculate.setEnabled(False)
         right_layout.addWidget(self.btn_calculate)
 
-        self.btn_cancel = QPushButton("⛔ Cancelar cálculo")
-        self.btn_cancel.setObjectName("btn_danger")
-        self.btn_cancel.setVisible(False)
-        self.btn_cancel.clicked.connect(self._cancel_calculation)
-        right_layout.addWidget(self.btn_cancel)
-
         splitter.addWidget(right_widget)
         splitter.setSizes([700, 300])
 
@@ -702,7 +696,6 @@ class MainWindow(QMainWindow):
 
         # Prepare: we pass ALL cells (for context) but only some have variables
         self.btn_calculate.setEnabled(False)
-        self.btn_cancel.setVisible(True)
         self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")
         self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
 
@@ -743,7 +736,6 @@ class MainWindow(QMainWindow):
         """Handle optimization completion."""
         self.results = results
         self.btn_calculate.setEnabled(True)
-        self.btn_cancel.setVisible(False)
 
         was_cancelled = getattr(self, "_was_cancelled", False)
         self._was_cancelled = False
@@ -779,14 +771,9 @@ class MainWindow(QMainWindow):
         self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
         self.tabs.setCurrentIndex(3)  # Switch to Results tab
 
-        self.status_label.setText(
-            f"Optimización completada: {n} planes, mejor score: {clean_best}"
-        )
-
     def _on_optimization_error(self, error_msg):
         """Handle optimization error."""
         self.btn_calculate.setEnabled(True)
-        self.btn_cancel.setVisible(False)
         self.lbl_progress.setText(f"❌ Error: {error_msg}")
         self.lbl_progress.setStyleSheet(f"color: {Colors.DANGER};")
 
