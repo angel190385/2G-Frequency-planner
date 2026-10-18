@@ -1466,10 +1466,10 @@ def _build_html_template(payload: dict) -> str:
             <div class="map-control-group">
                 <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Fondo:</span>
                 <select id="map-basemap-select" class="select-styled" onchange="onMapBasemapChanged(this.value)">
-                    <option value="dark">🌙 Oscuro (Carto Dark)</option>
-                    <option value="voyager">🗺️ Calles (Carto Voyager)</option>
-                    <option value="light">☀️ Claro (Carto Positron)</option>
+                    <option value="dark">🌙 Oscuro (ESRI Canvas)</option>
+                    <option value="osm_hot">🗺️ OpenStreetMap (Libre)</option>
                     <option value="satellite">🛰️ Satélite (ESRI)</option>
+                    <option value="streets">🧭 Calles / Topo (ESRI)</option>
                 </select>
             </div>
 
@@ -1958,7 +1958,7 @@ def _build_html_template(payload: dict) -> str:
         const next = current === 'dark' ? 'light' : 'dark';
         html.setAttribute('data-theme', next);
         if (typeof setMapBasemap === 'function') {{
-            setMapBasemap(next === 'dark' ? 'dark' : 'light');
+            setMapBasemap(next === 'dark' ? 'dark' : 'osm_hot');
         }}
     }}
 
@@ -2483,29 +2483,27 @@ def _build_html_template(payload: dict) -> str:
         mapInstance = L.map('map', {{ preferCanvas: true }}).setView([avgLat, avgLon], 13);
 
         baseLayers = {{
-            dark: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-                maxZoom: 20,
-                subdomains: 'abcd',
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            dark: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                maxZoom: 16,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
             }}),
-            voyager: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-                maxZoom: 20,
-                subdomains: 'abcd',
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            }}),
-            light: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-                maxZoom: 20,
-                subdomains: 'abcd',
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            osm_hot: L.tileLayer('https://{{s}}.tile.openstreetmap.fr/hot/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 19,
+                subdomains: 'abc',
+                attribution: '&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors, Tiles style by <a href=\"https://www.hotosm.org/\">HOT</a>'
             }}),
             satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
                 maxZoom: 19,
                 attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }}),
+            streets: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                maxZoom: 18,
+                attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), Esri Korea, Esri (Thailand), NGCC, (c) OpenStreetMap contributors, and the GIS User Community'
             }})
         }};
 
         const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-        setMapBasemap(currentTheme === 'light' ? 'light' : 'dark');
+        setMapBasemap(currentTheme === 'light' ? 'osm_hot' : 'dark');
 
         sectorsLayer = L.layerGroup().addTo(mapInstance);
         conflictsLayer = L.layerGroup().addTo(mapInstance);
