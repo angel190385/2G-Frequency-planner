@@ -215,9 +215,12 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
 
         cell_details.append({
             "cell_id": c.cell_id,
-            "station": c.station.name,
-            "station_id": c.station.station_id,
+            "station": c.station.name if c.station else "",
+            "station_id": c.station.station_id if c.station else "",
             "sector": c.sector,
+            "azimuth": c.azimuth,
+            "lat": c.station.latitude if c.station else 0.0,
+            "lon": c.station.longitude if c.station else 0.0,
             "bcch_before": bcch_before,
             "bcch_after": bcch_after,
             "bcch_changed": bcch_changed,
@@ -254,11 +257,23 @@ def _plan_to_dict(plan: PlanResult, name: str, cells: dict[str, Cell]) -> dict:
             if getattr(v, "is_inherited", False):
                 is_inh = True
 
+        lat1 = c_a.station.latitude if (c_a and c_a.station) else 0.0
+        lon1 = c_a.station.longitude if (c_a and c_a.station) else 0.0
+        lat2 = c_b.station.latitude if (c_b and c_b.station) else 0.0
+        lon2 = c_b.station.longitude if (c_b and c_b.station) else 0.0
+
         violations_data.append({
             "type": "Cocanal" if v.violation_type == "cochannel" else "Adyacente",
+            "raw_type": v.violation_type,
             "channel_types": both,
             "cell_a": v.cell_a_id,
             "cell_b": v.cell_b_id,
+            "lat1": lat1,
+            "lon1": lon1,
+            "lat2": lat2,
+            "lon2": lon2,
+            "channel_type_a": v.channel_type_a,
+            "channel_type_b": v.channel_type_b,
             "freq_a": v.freq_a,
             "freq_b": v.freq_b,
             "ho": v.ho_count if v.ho_count is not None else 0,
@@ -366,6 +381,7 @@ def _build_payload(
             "population_size": rules.population_size,
             "generations": rules.num_generations,
             "num_runs": rules.num_runs,
+            "has_coordinates": any(c.station and (c.station.latitude != 0.0 or c.station.longitude != 0.0) for c in cells.values()),
         },
         "baseline": baseline_dict,
         "scenarios": scenarios_dicts
@@ -375,12 +391,31 @@ def _build_payload(
 def _build_html_template(payload: dict) -> str:
     payload_json = json.dumps(payload, ensure_ascii=False).replace("</script>", "<\\/script>")
 
+    leaflet_dir = os.path.join(os.path.dirname(__file__), "..", "ui", "assets", "leaflet")
+    css_file = os.path.join(leaflet_dir, "leaflet.css")
+    js_file = os.path.join(leaflet_dir, "leaflet.js")
+
+    if os.path.isfile(css_file) and os.path.isfile(js_file):
+        try:
+            with open(css_file, "r", encoding="utf-8") as f:
+                leaflet_css = f"<style>{f.read()}</style>"
+            with open(js_file, "r", encoding="utf-8") as f:
+                leaflet_js = f"<script>{f.read()}</script>"
+        except Exception:
+            leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />'
+            leaflet_js = '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+    else:
+        leaflet_css = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />'
+        leaflet_js = '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
+
     return f"""<!DOCTYPE html>
 <html lang="es" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Freq Planner 2G — Dashboard Dinámico</title>
+    {leaflet_css}
+    {leaflet_js}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -1042,6 +1077,131 @@ def _build_html_template(payload: dict) -> str:
             line-height: 1.4;
         }}
 
+        /* Map Styles */
+        #map {{
+            height: 520px;
+            width: 100%;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            background: #0c1017;
+            position: relative;
+            z-index: 1;
+        }}
+
+        .leaflet-container {{
+            background-color: #0c1017 !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        }}
+
+        .map-controls-bar {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            margin-bottom: 12px;
+        }}
+
+        .map-control-group {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+
+        .map-legend {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 8px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            margin-top: 10px;
+        }}
+
+        .map-legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .legend-line-cochannel {{
+            width: 18px;
+            height: 3px;
+            background: #ef4444;
+            border-radius: 2px;
+            display: inline-block;
+        }}
+
+        .legend-line-adjacent {{
+            width: 18px;
+            height: 3px;
+            border-top: 3px dashed #f97316;
+            display: inline-block;
+        }}
+
+        .legend-dot-modified {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff007f;
+            box-shadow: 0 0 6px rgba(255, 0, 127, 0.6);
+            display: inline-block;
+        }}
+
+        .legend-dot-isolated {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #38bdf8;
+            box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+            display: inline-block;
+        }}
+
+        .sector-popup {{
+            color: #1a1a2e;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            font-size: 12px;
+            min-width: 210px;
+        }}
+
+        .sector-popup h3 {{
+            margin: 2px 0 6px 0;
+            font-size: 14px;
+            color: #0f3460;
+        }}
+
+        .badge-modified {{
+            display: inline-block;
+            background: linear-gradient(135deg, #ff007f, #9b59b6);
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(255, 0, 127, 0.3);
+        }}
+
+        .conflict-tooltip {{
+            background: #16213e !important;
+            color: #e0e0e8 !important;
+            border: 1px solid #00d4aa !important;
+            border-radius: 4px !important;
+            padding: 4px 8px !important;
+            font-size: 11px !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+        }}
+
         /* Print Style */
         @media print {{
             body {{
@@ -1264,6 +1424,87 @@ def _build_html_template(payload: dict) -> str:
         </div>
     </div>
 
+    <!-- Interactive Network Map Panel -->
+    <div class="panel" style="margin-bottom: 24px;" id="map-panel-container">
+        <div class="panel-header">
+            <div class="panel-title">🗺️ Mapa Geográfico de Sectores y Conflictos (<span id="map-active-scenario-title"></span>)</div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge-pill badge-info" id="map-summary-badge">Visualización interactiva</span>
+                <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="resetMapView()">🎯 Centrar Mapa</button>
+            </div>
+        </div>
+
+        <div class="map-controls-bar">
+            <!-- Selector de Celda -->
+            <div class="map-control-group">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Celda:</span>
+                <select id="map-cell-select" class="select-styled" onchange="onMapCellSelected(this.value)" style="min-width: 170px;">
+                    <option value="">🔍 Todas las celdas</option>
+                </select>
+            </div>
+
+            <!-- Canal / ARFCN -->
+            <div class="map-control-group">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Canal:</span>
+                <select id="map-channel-select" class="select-styled" onchange="onMapFilterChanged()">
+                    <option value="-1">Todos los canales</option>
+                </select>
+            </div>
+
+            <!-- Conflictos overlay -->
+            <div class="map-control-group">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Líneas de Conflicto:</span>
+                <select id="map-conflicts-select" class="select-styled" onchange="onMapFilterChanged()">
+                    <option value="all">Todas las coincidencias</option>
+                    <option value="cochannel">Solo Cocanalidades (Rojo)</option>
+                    <option value="adjacent">Solo Adyacencias (Naranja)</option>
+                    <option value="none">Ocultar líneas</option>
+                </select>
+            </div>
+
+            <!-- Toggles / Checks -->
+            <div class="map-control-group" style="gap: 14px;">
+                <label class="toggle-label" title="Oculta líneas que conectan fuera de la vista visible">
+                    <input type="checkbox" id="map-toggle-viewport" onchange="onMapViewportToggled(this.checked)" checked>
+                    👁️ Vista actual
+                </label>
+                <label class="toggle-label" title="Muestra únicamente las celdas modificadas en este escenario">
+                    <input type="checkbox" id="map-toggle-modified" onchange="onMapFilterChanged()">
+                    🔄 Solo modificadas
+                </label>
+                <label class="toggle-label" title="Aísla la celda seleccionada sombreando el resto y colorea celdas en conflicto">
+                    <input type="checkbox" id="map-toggle-isolate" onchange="onMapIsolateToggled(this.checked)">
+                    🎯 Aislar celda
+                </label>
+            </div>
+        </div>
+
+        <div id="map"></div>
+
+        <div class="map-legend">
+            <span style="font-weight: 700; color: var(--text-main);">Leyenda:</span>
+            <div class="map-legend-item">
+                <span class="legend-line-cochannel"></span>
+                <span>Cocanal (Rojo)</span>
+            </div>
+            <div class="map-legend-item">
+                <span class="legend-line-adjacent"></span>
+                <span>Adyacente (Naranja discontinua)</span>
+            </div>
+            <div class="map-legend-item">
+                <span class="legend-dot-modified"></span>
+                <span>Celda Modificada</span>
+            </div>
+            <div class="map-legend-item">
+                <span class="legend-dot-isolated"></span>
+                <span>Celda Aislada</span>
+            </div>
+            <div class="map-legend-item">
+                <span>🎨 Color de sector: Distribución áurea según ARFCN asignado</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Cell Assignments Detail Table -->
     <div class="panel" style="margin-bottom: 24px;">
         <div class="panel-header">
@@ -1388,6 +1629,7 @@ def _build_html_template(payload: dict) -> str:
         setupCanvasEvents();
         renderScenarioTabs();
         renderMatrixTable();
+        initMap();
         selectScenario(0); // Select first scenario by default
     }}
 
@@ -1446,6 +1688,9 @@ def _build_html_template(payload: dict) -> str:
         // Render KPI Cards
         renderKpis(activePlan, base);
         renderChannelAnalytics();
+
+        // Render Map
+        renderMap();
 
         // Render Tables
         renderCellsTable();
@@ -1609,7 +1854,7 @@ def _build_html_template(payload: dict) -> str:
 
             return `
                 <tr>
-                    <td style="font-weight: 700;">${{escapeHtml(c.cell_id)}}</td>
+                    <td style="font-weight: 700; cursor: pointer; color: var(--primary);" onclick="focusCellOnMap('${{escapeHtml(c.cell_id)}}')" title="Centrar celda en el mapa">📡 ${{escapeHtml(c.cell_id)}}</td>
                     <td>${{escapeHtml(c.station)}}</td>
                     <td><span class="badge-pill" style="background: var(--bg-card);">${{escapeHtml(c.sector)}}</span></td>
                     <td class="font-mono">${{bcchBefore}}</td>
@@ -1671,8 +1916,8 @@ def _build_html_template(payload: dict) -> str:
                 <tr>
                     <td>${{originBadge}}</td>
                     <td><span class="badge-pill ${{badgeClass}}">${{escapeHtml(v.type)}} (${{escapeHtml(v.channel_types)}})</span></td>
-                    <td style="font-weight: 700;">${{escapeHtml(v.cell_a)}}</td>
-                    <td style="font-weight: 700;">${{escapeHtml(v.cell_b)}}</td>
+                    <td style="font-weight: 700; cursor: pointer; color: var(--primary);" onclick="focusCellOnMap('${{escapeHtml(v.cell_a)}}')" title="Centrar celda en el mapa">${{escapeHtml(v.cell_a)}}</td>
+                    <td style="font-weight: 700; cursor: pointer; color: var(--primary);" onclick="focusCellOnMap('${{escapeHtml(v.cell_b)}}')" title="Centrar celda en el mapa">${{escapeHtml(v.cell_b)}}</td>
                     <td class="font-mono">${{v.freq_a}}</td>
                     <td class="font-mono">${{v.freq_b}}</td>
                     <td class="font-mono">${{v.ho || '—'}}</td>
@@ -2100,6 +2345,7 @@ def _build_html_template(payload: dict) -> str:
 
         window.addEventListener('resize', () => {{
             renderChannelAnalytics();
+            if (mapInstance) mapInstance.invalidateSize();
         }});
     }}
 
@@ -2124,6 +2370,376 @@ def _build_html_template(payload: dict) -> str:
                 </tr>
             `;
         }}).join('');
+    }}
+
+    // ── Map Module ────────────────────────────────────────────────
+    let mapInstance = null;
+    let sectorsLayer = null;
+    let conflictsLayer = null;
+    let cellLayersMap = {{}};
+    let currentMapConflicts = [];
+    let focusedCellId = null;
+    let viewportFiltering = true;
+    let isolateCellMode = false;
+
+    function _freqToColor(freq) {{
+        if (!freq || freq <= 0) return '#8888a0';
+        const hue = (freq * 137.508) % 360;
+        return `hsl(${{Math.round(hue)}}, 85%, 55%)`;
+    }}
+
+    function getDestinationPoint(lat, lon, brng, distMeters) {{
+        const R = 6371000;
+        const rad = brng * Math.PI / 180;
+        const lat1 = lat * Math.PI / 180;
+        const lon1 = lon * Math.PI / 180;
+
+        const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distMeters / R) +
+                     Math.cos(lat1) * Math.sin(distMeters / R) * Math.cos(rad));
+        const lon2 = lon1 + Math.atan2(Math.sin(rad) * Math.sin(distMeters / R) * Math.cos(lat1),
+                     Math.cos(distMeters / R) - Math.sin(lat1) * Math.sin(lat2));
+
+        return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+    }}
+
+    function initMap() {{
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer || typeof L === 'undefined') return;
+
+        const allCells = data.baseline ? data.baseline.cells : [];
+        const validCoords = allCells.filter(c => (c.lat && c.lat !== 0) || (c.lon && c.lon !== 0));
+        if (validCoords.length === 0) {{
+            const panel = document.getElementById('map-panel-container');
+            if (panel) {{
+                panel.innerHTML = `
+                    <div class="panel-header">
+                        <div class="panel-title">🗺️ Mapa Geográfico de Red</div>
+                    </div>
+                    <div style="text-align: center; color: var(--text-dim); padding: 36px 16px;">
+                        ℹ️ No se detectaron coordenadas geográficas (latitud/longitud) en las estaciones de esta red.
+                    </div>
+                `;
+            }}
+            return;
+        }}
+
+        const cellSelect = document.getElementById('map-cell-select');
+        if (cellSelect) {{
+            const sortedCells = [...validCoords].sort((a, b) => a.cell_id.localeCompare(b.cell_id));
+            sortedCells.forEach(c => {{
+                const opt = document.createElement('option');
+                opt.value = c.cell_id;
+                opt.textContent = `${{c.cell_id}} (${{c.station || ''}})`;
+                cellSelect.appendChild(opt);
+            }});
+        }}
+
+        const chanSelect = document.getElementById('map-channel-select');
+        if (chanSelect && data.metadata && data.metadata.all_channels) {{
+            data.metadata.all_channels.forEach(ch => {{
+                const opt = document.createElement('option');
+                opt.value = ch;
+                opt.textContent = `ARFCN ${{ch}}`;
+                chanSelect.appendChild(opt);
+            }});
+        }}
+
+        let avgLat = 0, avgLon = 0;
+        validCoords.forEach(c => {{ avgLat += c.lat; avgLon += c.lon; }});
+        avgLat /= validCoords.length;
+        avgLon /= validCoords.length;
+
+        mapInstance = L.map('map', {{ preferCanvas: true }}).setView([avgLat, avgLon], 13);
+        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }}).addTo(mapInstance);
+
+        sectorsLayer = L.layerGroup().addTo(mapInstance);
+        conflictsLayer = L.layerGroup().addTo(mapInstance);
+
+        mapInstance.on('moveend', () => {{
+            if (viewportFiltering && !isolateCellMode) {{
+                renderMapConflicts();
+            }}
+        }});
+
+        renderMap();
+        resetMapView();
+    }}
+
+    function renderMap() {{
+        if (!mapInstance || !sectorsLayer || !conflictsLayer) return;
+
+        const plan = activeScenarioIndex === -1 ? data.baseline : data.scenarios[activeScenarioIndex];
+        if (!plan) return;
+
+        const titleEl = document.getElementById('map-active-scenario-title');
+        if (titleEl) titleEl.innerText = plan.name;
+
+        const chanSelect = document.getElementById('map-channel-select');
+        const chanVal = chanSelect ? chanSelect.value : '-1';
+        const targetFreq = parseInt(chanVal, 10);
+        const conflictsSelect = document.getElementById('map-conflicts-select');
+        const conflictMode = conflictsSelect ? conflictsSelect.value : 'all';
+        const modCheck = document.getElementById('map-toggle-modified');
+        const onlyModified = modCheck ? modCheck.checked : false;
+        const isoCheck = document.getElementById('map-toggle-isolate');
+        isolateCellMode = isoCheck ? isoCheck.checked : false;
+
+        sectorsLayer.clearLayers();
+        conflictsLayer.clearLayers();
+        cellLayersMap = {{}};
+
+        currentMapConflicts = [];
+        const modifiedCids = new Set();
+        plan.cells.forEach(c => {{
+            if (c.is_changed) modifiedCids.add(c.cell_id);
+        }});
+
+        if (conflictMode !== 'none' && plan.violations) {{
+            plan.violations.forEach(v => {{
+                const rType = v.raw_type || (v.type === 'Cocanal' ? 'cochannel' : 'adjacent');
+                if (conflictMode === 'cochannel' && rType !== 'cochannel') return;
+                if (conflictMode === 'adjacent' && rType !== 'adjacent') return;
+                if (!v.lat1 || !v.lon1 || !v.lat2 || !v.lon2) return;
+
+                if (onlyModified && !modifiedCids.has(v.cell_a) && !modifiedCids.has(v.cell_b)) {{
+                    return;
+                }}
+
+                if (targetFreq > 0 && v.freq_a !== targetFreq && v.freq_b !== targetFreq) {{
+                    return;
+                }}
+
+                const lineText = `⚠️ ${{rType.toUpperCase()}}: ${{v.cell_a}} (${{v.channel_type_a || ''}} ${{v.freq_a}}) ↔ ${{v.cell_b}} (${{v.channel_type_b || ''}} ${{v.freq_b}}) | Dist: ${{v.dist}} km | Coste: ${{v.cost}}`;
+                currentMapConflicts.push({{
+                    lat1: v.lat1,
+                    lon1: v.lon1,
+                    lat2: v.lat2,
+                    lon2: v.lon2,
+                    cell_a_id: v.cell_a,
+                    cell_b_id: v.cell_b,
+                    type: rType,
+                    text: lineText
+                }});
+            }});
+        }}
+
+        const conflictsWithFocused = {{}};
+        if (isolateCellMode && focusedCellId && currentMapConflicts.length > 0) {{
+            currentMapConflicts.forEach(cf => {{
+                let other = null;
+                if (cf.cell_a_id === focusedCellId) other = cf.cell_b_id;
+                else if (cf.cell_b_id === focusedCellId) other = cf.cell_a_id;
+                if (other) {{
+                    if (cf.type === 'cochannel') {{
+                        conflictsWithFocused[other] = 'cochannel';
+                    }} else if (cf.type === 'adjacent' && conflictsWithFocused[other] !== 'cochannel') {{
+                        conflictsWithFocused[other] = 'adjacent';
+                    }}
+                }}
+            }});
+        }}
+
+        const validCells = plan.cells.filter(c => (c.lat && c.lat !== 0) || (c.lon && c.lon !== 0));
+        validCells.forEach(c => {{
+            const isMod = !!c.is_changed;
+            if (onlyModified && !isMod) return;
+
+            const bcch = c.bcch_after !== null && c.bcch_after !== undefined ? c.bcch_after : c.bcch_before;
+            const tchList = c.tch_after && c.tch_after.length ? c.tch_after : c.tch_before;
+
+            if (targetFreq > 0 && bcch !== targetFreq && (!tchList || !tchList.includes(targetFreq))) {{
+                return;
+            }}
+
+            const isFocused = (focusedCellId && c.cell_id === focusedCellId);
+            const conflictType = conflictsWithFocused[c.cell_id];
+
+            let fillColor = _freqToColor(bcch);
+            let strokeColor = isMod ? '#ff007f' : fillColor;
+            let fillOpacity = isMod ? 0.75 : 0.5;
+            let strokeWeight = isMod ? 3.5 : 2;
+
+            if (isolateCellMode && focusedCellId) {{
+                if (isFocused) {{
+                    fillColor = '#38bdf8';
+                    strokeColor = '#ffffff';
+                    fillOpacity = 0.95;
+                    strokeWeight = 4;
+                }} else if (conflictType === 'cochannel') {{
+                    fillColor = '#ef4444';
+                    strokeColor = '#b91c1c';
+                    fillOpacity = 0.85;
+                    strokeWeight = 3;
+                }} else if (conflictType === 'adjacent') {{
+                    fillColor = '#f97316';
+                    strokeColor = '#c2410c';
+                    fillOpacity = 0.85;
+                    strokeWeight = 3;
+                }} else {{
+                    fillColor = '#334155';
+                    strokeColor = '#1e293b';
+                    fillOpacity = 0.12;
+                    strokeWeight = 1;
+                }}
+            }}
+
+            const points = [[c.lat, c.lon]];
+            const beamWidth = 60;
+            const halfWidth = beamWidth / 2;
+            const startAngle = (c.azimuth || 0) - halfWidth;
+            const endAngle = (c.azimuth || 0) + halfWidth;
+            const radiusMeters = 220;
+            const step = (validCells.length > 500) ? 15 : 6;
+
+            for (let a = startAngle; a <= endAngle; a += step) {{
+                points.push(getDestinationPoint(c.lat, c.lon, a, radiusMeters));
+            }}
+            points.push([c.lat, c.lon]);
+
+            const polygon = L.polygon(points, {{
+                color: strokeColor,
+                fillColor: fillColor,
+                fillOpacity: fillOpacity,
+                weight: strokeWeight,
+                dashArray: (isMod && strokeColor === '#ff007f') ? '4, 4' : null
+            }});
+
+            let popupContent = `<div class="sector-popup">`;
+            if (isMod) {{
+                popupContent += `<div class="badge-modified">✨ Modificada</div><br/>`;
+            }}
+            popupContent += `<h3>📡 ${{escapeHtml(c.cell_id)}}</h3>` +
+                `<b>Estación:</b> ${{escapeHtml(c.station || '')}}<br/>` +
+                `<b>Sector:</b> ${{escapeHtml(c.sector || '')}} | <b>Azimut:</b> ${{c.azimuth || 0}}°<br/>`;
+
+            if (isMod) {{
+                const bcchB = c.bcch_before !== null ? c.bcch_before : '—';
+                const bcchA = c.bcch_after !== null ? c.bcch_after : '—';
+                const tchB = c.tch_before && c.tch_before.length ? c.tch_before.join(', ') : '—';
+                const tchA = c.tch_after && c.tch_after.length ? c.tch_after.join(', ') : '—';
+                popupContent += `<div style="margin-top:6px;padding:6px;background:#f4f5f8;border-left:3px solid #ff007f;border-radius:3px;">` +
+                    `<b>BCCH:</b> ${{bcchB}} ➔ <b style="color:#ff007f;font-size:13px;">${{bcchA}}</b><br/>` +
+                    `<b>TCH:</b> ${{tchB}} ➔ <b style="color:#008b8b;font-size:13px;">${{tchA}}</b>` +
+                    `</div>`;
+            }} else {{
+                popupContent += `<b>BCCH:</b> <span style="font-weight:bold;color:#00b894;">${{bcch || '—'}}</span><br/>` +
+                    `<b>TCH:</b> ${{tchList && tchList.length ? tchList.join(', ') : '—'}}`;
+            }}
+            popupContent += `</div>`;
+
+            polygon.bindPopup(popupContent);
+            sectorsLayer.addLayer(polygon);
+
+            if (isMod) {{
+                const stMarker = L.circleMarker([c.lat, c.lon], {{
+                    radius: 5,
+                    color: '#ffffff',
+                    fillColor: '#ff007f',
+                    fillOpacity: 1.0,
+                    weight: 2
+                }});
+                stMarker.bindPopup(popupContent);
+                sectorsLayer.addLayer(stMarker);
+            }}
+
+            cellLayersMap[c.cell_id] = {{
+                polygon: polygon,
+                lat: c.lat,
+                lon: c.lon,
+                data: c
+            }};
+        }});
+
+        renderMapConflicts();
+    }}
+
+    function renderMapConflicts() {{
+        if (!conflictsLayer || !mapInstance) return;
+        conflictsLayer.clearLayers();
+        if (!currentMapConflicts || currentMapConflicts.length === 0) return;
+
+        const bounds = mapInstance.getBounds();
+        currentMapConflicts.forEach(cf => {{
+            const isLineForFocused = (focusedCellId && (cf.cell_a_id === focusedCellId || cf.cell_b_id === focusedCellId));
+            if (isolateCellMode && focusedCellId) {{
+                if (!isLineForFocused) return;
+            }} else if (viewportFiltering && !isLineForFocused) {{
+                const in1 = bounds.contains([cf.lat1, cf.lon1]);
+                const in2 = bounds.contains([cf.lat2, cf.lon2]);
+                if (!in1 || !in2) return;
+            }}
+
+            const isCo = (cf.type === 'cochannel');
+            const color = isCo ? '#ef4444' : '#f97316';
+            const line = L.polyline([[cf.lat1, cf.lon1], [cf.lat2, cf.lon2]], {{
+                color: color,
+                weight: isCo ? 3.5 : 2.5,
+                opacity: 0.9,
+                dashArray: isCo ? null : '6, 6'
+            }});
+            line.bindTooltip(escapeHtml(cf.text), {{ sticky: true, className: 'conflict-tooltip' }});
+            conflictsLayer.addLayer(line);
+        }});
+    }}
+
+    function onMapFilterChanged() {{
+        renderMap();
+    }}
+
+    function onMapViewportToggled(checked) {{
+        viewportFiltering = checked;
+        renderMapConflicts();
+    }}
+
+    function onMapIsolateToggled(checked) {{
+        isolateCellMode = checked;
+        renderMap();
+    }}
+
+    function onMapCellSelected(cid) {{
+        focusedCellId = cid || null;
+        if (isolateCellMode) {{
+            renderMap();
+        }}
+        if (cid && cellLayersMap[cid]) {{
+            const item = cellLayersMap[cid];
+            mapInstance.setView([item.lat, item.lon], 16, {{ animate: true }});
+            setTimeout(() => {{ item.polygon.openPopup(); }}, 300);
+        }} else if (!cid) {{
+            resetMapView();
+        }}
+        renderMapConflicts();
+    }}
+
+    function resetMapView() {{
+        if (!mapInstance) return;
+        focusedCellId = null;
+        const cellSelect = document.getElementById('map-cell-select');
+        if (cellSelect) cellSelect.value = '';
+
+        const b = L.latLngBounds();
+        let count = 0;
+        for (const k in cellLayersMap) {{
+            b.extend([cellLayersMap[k].lat, cellLayersMap[k].lon]);
+            count++;
+        }}
+        if (count > 0) {{
+            mapInstance.fitBounds(b, {{ padding: [50, 50] }});
+        }}
+        renderMapConflicts();
+    }}
+
+    function focusCellOnMap(cellId) {{
+        const cellSelect = document.getElementById('map-cell-select');
+        if (cellSelect) cellSelect.value = cellId;
+        onMapCellSelected(cellId);
+        const mapContainer = document.getElementById('map-panel-container');
+        if (mapContainer) {{
+            mapContainer.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+        }}
     }}
 
     // Auto-init on load

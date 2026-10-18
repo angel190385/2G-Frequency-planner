@@ -234,6 +234,77 @@ class TestMejorasMapaCalculo(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def test_html_export_includes_interactive_map(self):
+        """Verify that HTML export contains the interactive Leaflet map, controls, coordinates and script."""
+        import json
+        import re
+        import tempfile
+
+        plan_assignments = [
+            FrequencyAssignment("CELL1", bcch=50, tch_list=[60, 62, 64]),
+            FrequencyAssignment("CELL2", bcch=50, tch_list=[70, 72]),
+            FrequencyAssignment("CELL3", bcch=51, tch_list=[70, 80]),
+        ]
+        res = evaluate_plan(
+            {a.cell_id: a for a in plan_assignments},
+            self.cells,
+            self.neighbor_graph,
+            self.rules
+        )
+        res.plan_id = 1
+        res.run_id = 1
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+            temp_path = f.name
+
+        try:
+            export_plan_html(temp_path, self.cells, self.neighbor_graph, self.rules, [res])
+            with open(temp_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+
+            # 1. Map container and Leaflet elements
+            self.assertIn('id="map"', html_content)
+            self.assertIn('id="map-panel-container"', html_content)
+            self.assertIn('leaflet', html_content.lower())
+
+            # 2. Controls
+            self.assertIn('id="map-cell-select"', html_content)
+            self.assertIn('id="map-channel-select"', html_content)
+            self.assertIn('id="map-conflicts-select"', html_content)
+            self.assertIn('id="map-toggle-viewport"', html_content)
+            self.assertIn('id="map-toggle-modified"', html_content)
+            self.assertIn('id="map-toggle-isolate"', html_content)
+
+            # 3. JavaScript functions
+            self.assertIn('initMap()', html_content)
+            self.assertIn('renderMap()', html_content)
+            self.assertIn('focusCellOnMap', html_content)
+            self.assertIn('resetMapView', html_content)
+
+            # 4. Payload contains coordinates and azimuth
+            m = re.search(r"const data = (\{.*?\});\s*let activeScenarioIndex", html_content, re.DOTALL)
+            self.assertIsNotNone(m)
+            data_json = json.loads(m.group(1))
+
+            cells_list = data_json["baseline"]["cells"]
+            self.assertTrue(len(cells_list) > 0)
+            cell1 = next(c for c in cells_list if c["cell_id"] == "CELL1")
+            self.assertEqual(cell1["lat"], 40.0)
+            self.assertEqual(cell1["lon"], -3.0)
+            self.assertEqual(cell1["azimuth"], 0)
+
+            # Check violations have coordinate endpoints
+            if data_json["baseline"]["violations"]:
+                v = data_json["baseline"]["violations"][0]
+                self.assertIn("lat1", v)
+                self.assertIn("lon1", v)
+                self.assertIn("lat2", v)
+                self.assertIn("lon2", v)
+                self.assertIn("raw_type", v)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
     def test_fast_evaluator_cost_decomposition(self):
         """Verify FastPlanEvaluator.evaluate_matrix decomposes inherited vs new costs properly."""
         import numpy as np
