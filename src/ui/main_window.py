@@ -573,9 +573,21 @@ class MainWindow(QMainWindow):
     def _deselect_all_cells(self):
         self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
+            # 1. Uncheck Recalc
             item = self.calc_table.item(row, 0)
             if item:
                 item.setCheckState(Qt.CheckState.Unchecked)
+
+            # 2. Uncheck Recalc BCCH
+            item_bcch = self.calc_table.item(row, 5)
+            if item_bcch:
+                item_bcch.setCheckState(Qt.CheckState.Unchecked)
+
+            # 3. Clear TCH a recalcular
+            item_tch = self.calc_table.item(row, 7)
+            if item_tch:
+                item_tch.setText("")
+
         self.calc_table.blockSignals(False)
         self._apply_calc_selections()
         self._on_calc_selection_changed()

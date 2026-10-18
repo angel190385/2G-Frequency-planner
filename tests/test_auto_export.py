@@ -306,6 +306,25 @@ class TestAutoExport(unittest.TestCase):
         self.assertEqual(win.lbl_calc_cells.text(), "2 celdas seleccionadas")
         self.assertEqual(win.lbl_calc_vars.text(), "6 variables a optimizar")
 
+        # 3. Test 'Deseleccionar todo' (clears Recalc, Recalc BCCH, and all TCHs to recalculate)
+        win.btn_deselect_all.click()
+
+        for row in range(win.calc_table.rowCount()):
+            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, 7).text(), "")
+
+        self.assertFalse(self.c1.recalculate_bcch)
+        self.assertEqual(self.c1.tch_indices_to_recalculate, [])
+        self.assertFalse(self.c1.needs_calculation)
+
+        self.assertFalse(self.c2.recalculate_bcch)
+        self.assertEqual(self.c2.tch_indices_to_recalculate, [])
+        self.assertFalse(self.c2.needs_calculation)
+
+        self.assertEqual(win.lbl_calc_cells.text(), "0 celdas seleccionadas")
+        self.assertEqual(win.lbl_calc_vars.text(), "0 variables a optimizar")
+
         win.close()
 
 
