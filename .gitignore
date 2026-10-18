@@ -39,6 +39,7 @@ Thumbs.db
 
 # Reports
 *.pdf
+*.html
 
 # Automatic execution export folders
 ejecucion_*/

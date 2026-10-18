@@ -271,6 +271,7 @@ class TestMejorasMapaCalculo(unittest.TestCase):
             self.assertIn('id="map-cell-select"', html_content)
             self.assertIn('id="map-channel-select"', html_content)
             self.assertIn('id="map-conflicts-select"', html_content)
+            self.assertIn('id="map-basemap-select"', html_content)
             self.assertIn('id="map-toggle-viewport"', html_content)
             self.assertIn('id="map-toggle-modified"', html_content)
             self.assertIn('id="map-toggle-isolate"', html_content)

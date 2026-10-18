@@ -1462,6 +1462,17 @@ def _build_html_template(payload: dict) -> str:
                 </select>
             </div>
 
+            <!-- Fondo de Mapa -->
+            <div class="map-control-group">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Fondo:</span>
+                <select id="map-basemap-select" class="select-styled" onchange="onMapBasemapChanged(this.value)">
+                    <option value="dark">🌙 Oscuro (Carto Dark)</option>
+                    <option value="voyager">🗺️ Calles (Carto Voyager)</option>
+                    <option value="light">☀️ Claro (Carto Positron)</option>
+                    <option value="satellite">🛰️ Satélite (ESRI)</option>
+                </select>
+            </div>
+
             <!-- Toggles / Checks -->
             <div class="map-control-group" style="gap: 14px;">
                 <label class="toggle-label" title="Oculta líneas que conectan fuera de la vista visible">
@@ -1946,6 +1957,9 @@ def _build_html_template(payload: dict) -> str:
         const current = html.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
         html.setAttribute('data-theme', next);
+        if (typeof setMapBasemap === 'function') {{
+            setMapBasemap(next === 'dark' ? 'dark' : 'light');
+        }}
     }}
 
     function exportActiveCsv() {{
@@ -2374,6 +2388,8 @@ def _build_html_template(payload: dict) -> str:
 
     // ── Map Module ────────────────────────────────────────────────
     let mapInstance = null;
+    let baseLayers = {{}};
+    let currentBaseLayer = null;
     let sectorsLayer = null;
     let conflictsLayer = null;
     let cellLayersMap = {{}};
@@ -2381,6 +2397,21 @@ def _build_html_template(payload: dict) -> str:
     let focusedCellId = null;
     let viewportFiltering = true;
     let isolateCellMode = false;
+
+    function setMapBasemap(key) {{
+        if (!mapInstance || !baseLayers[key]) return;
+        if (currentBaseLayer) {{
+            mapInstance.removeLayer(currentBaseLayer);
+        }}
+        currentBaseLayer = baseLayers[key];
+        mapInstance.addLayer(currentBaseLayer);
+        const sel = document.getElementById('map-basemap-select');
+        if (sel && sel.value !== key) sel.value = key;
+    }}
+
+    function onMapBasemapChanged(key) {{
+        setMapBasemap(key);
+    }}
 
     function _freqToColor(freq) {{
         if (!freq || freq <= 0) return '#8888a0';
@@ -2450,10 +2481,31 @@ def _build_html_template(payload: dict) -> str:
         avgLon /= validCoords.length;
 
         mapInstance = L.map('map', {{ preferCanvas: true }}).setView([avgLat, avgLon], 13);
-        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }}).addTo(mapInstance);
+
+        baseLayers = {{
+            dark: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                maxZoom: 20,
+                subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }}),
+            voyager: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                maxZoom: 20,
+                subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }}),
+            light: L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                maxZoom: 20,
+                subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }}),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }})
+        }};
+
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        setMapBasemap(currentTheme === 'light' ? 'light' : 'dark');
 
         sectorsLayer = L.layerGroup().addTo(mapInstance);
         conflictsLayer = L.layerGroup().addTo(mapInstance);
