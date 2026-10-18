@@ -70,9 +70,11 @@ def export_plan_html(
 
     # 2. Extract best candidate scenario per execution/run
     scenarios: list[PlanResult] = []
-    if hasattr(results, "per_run") and getattr(results, "per_run"):
-        for run_id in sorted(results.per_run.keys()):
-            run_plans = results.per_run[run_id]
+    per_run = getattr(results, "per_run", None)
+
+    if per_run:
+        for run_id in sorted(per_run.keys()):
+            run_plans = per_run[run_id]
             if run_plans:
                 best_of_run = min(run_plans, key=lambda r: r.score)
                 scenarios.append(best_of_run)
@@ -80,13 +82,16 @@ def export_plan_html(
         runs_map: dict[int, list[PlanResult]] = {}
         for r in results:
             runs_map.setdefault(r.run_id, []).append(r)
-        if len(runs_map) > 1:
-            for run_id in sorted(runs_map.keys()):
-                best_of_run = min(runs_map[run_id], key=lambda r: r.score)
-                scenarios.append(best_of_run)
-        else:
-            sorted_results = sorted(results, key=lambda r: r.score)
-            scenarios = sorted_results[:5]
+
+        for run_id in sorted(runs_map.keys()):
+            best_of_run = min(runs_map[run_id], key=lambda r: r.score)
+            scenarios.append(best_of_run)
+
+    # Sort scenarios from best score (lowest) to worst across all executions
+    scenarios.sort(key=lambda r: r.score)
+
+    if not scenarios and results:
+        scenarios = [min(results, key=lambda r: r.score)]
 
     selected_plan = None
     if selected_plan_id is not None:

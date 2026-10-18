@@ -549,11 +549,32 @@ def run_parallel_optimizer(
         per_run_final_results[1] = [plan]
         per_run_final_history[1] = [(1, score)]
 
-    # Global best aggregation across all runs
-    all_global_candidates.sort(key=lambda p: p.score)
+    # Global best aggregation across all runs:
+    # First guarantee that the best plan of each distinct execution is included, sorted by score.
     global_results: list[PlanResult] = []
     global_seen = set()
 
+    best_per_run_list: list[PlanResult] = []
+    for r in range(1, num_runs + 1):
+        r_list = per_run_final_results.get(r, [])
+        if r_list:
+            best_per_run_list.append(r_list[0])
+
+    best_per_run_list.sort(key=lambda p: p.score)
+
+    for cand in best_per_run_list:
+        if len(global_results) >= top_k:
+            break
+        sig = tuple(
+            (a.cell_id, a.bcch, tuple(a.tch_list))
+            for a in sorted(cand.assignments, key=lambda x: x.cell_id)
+        )
+        if sig not in global_seen:
+            global_seen.add(sig)
+            cand.plan_id = len(global_results) + 1
+            global_results.append(cand)
+
+    # Then fill any remaining slots up to top_k with the remaining best global candidates
     for cand in all_global_candidates:
         if len(global_results) >= top_k:
             break
@@ -564,9 +585,8 @@ def run_parallel_optimizer(
         if sig in global_seen:
             continue
         global_seen.add(sig)
-        cand_copy = cand
-        cand_copy.plan_id = len(global_results) + 1
-        global_results.append(cand_copy)
+        cand.plan_id = len(global_results) + 1
+        global_results.append(cand)
 
     if not global_results and per_run_final_results:
         global_results = per_run_final_results.get(1, [])

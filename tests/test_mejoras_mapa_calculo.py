@@ -287,9 +287,31 @@ class TestMejorasMapaCalculo(unittest.TestCase):
             with open(temp_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # The scenarios extracted must be the best of Run 1 (Plan 2) and best of Run 2 (Plan 3)
+            # The scenarios extracted must be the best of Run 1 (Plan 2, score 190) and best of Run 2 (Plan 3, score 170)
             self.assertIn("Ejecución 1", content)
             self.assertIn("Ejecución 2", content)
+            # Best overall (Plan 3, score 170) should be Escenario 1 (Recomendado)
+            self.assertIn("Escenario 1 (Ejecución 2) (Recomendado)", content)
+            self.assertIn("Escenario 2 (Ejecución 1)", content)
+
+            # Test single execution: 5 plans from the same run 1 -> only 1 scenario exported
+            single_run_plans = [
+                PlanResult(plan_id=i, run_id=1, score=100.0 + i, assignments=[
+                    FrequencyAssignment(cid, c.bcch or 50, list(c.tch_list)) for cid, c in self.cells.items()
+                ])
+                for i in range(1, 6)
+            ]
+            export_plan_html(temp_path, self.cells, self.neighbor_graph, self.rules, single_run_plans)
+            with open(temp_path, "r", encoding="utf-8") as f:
+                single_content = f.read()
+
+            import json
+            import re
+            m = re.search(r"const data = (\{.*?\});\s*let activeScenarioIndex", single_content, re.DOTALL)
+            self.assertIsNotNone(m)
+            data_json = json.loads(m.group(1))
+            self.assertEqual(len(data_json["scenarios"]), 1)
+            self.assertEqual(data_json["scenarios"][0]["score"], 101.0)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)

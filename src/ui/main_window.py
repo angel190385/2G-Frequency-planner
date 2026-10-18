@@ -39,7 +39,7 @@ from src.ui.dialogs.convergence_dialog import ConvergenceDialog
 class OptimizerThread(QThread):
     """Background thread for running the optimization."""
     progress = pyqtSignal(int, int, int, int, float)  # run_idx, total_runs, gen, total_gen, best_score
-    finished = pyqtSignal(list)  # list[PlanResult]
+    finished = pyqtSignal(object)  # OptimizationResultList preserved with per_run and per_run_history
     error = pyqtSignal(str)
 
     def __init__(self, cells, neighbor_graph, rules, max_workers: int | None = None):
@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
         act_export.triggered.connect(self._export_results)
         file_menu.addAction(act_export)
 
-        act_export_html = QAction("🌐 Exportar Informe HTML Dinámico (3 Escenarios)...", self)
+        act_export_html = QAction("🌐 Exportar Informe HTML Dinámico (Escenarios)...", self)
         act_export_html.setShortcut("Ctrl+H")
         act_export_html.triggered.connect(self._export_html)
         file_menu.addAction(act_export_html)
@@ -999,7 +999,7 @@ class MainWindow(QMainWindow):
 
             res = QMessageBox.information(
                 self, "Informe HTML Dinámico Generado",
-                f"✅ Informe HTML dinámico interactivo generado con éxito con la comparativa de 3 escenarios:\n\n{file_path}\n\n"
+                f"✅ Informe HTML dinámico interactivo generado con éxito con la comparativa de escenarios por ejecución:\n\n{file_path}\n\n"
                 f"¿Deseas abrir el informe en tu navegador web ahora?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
