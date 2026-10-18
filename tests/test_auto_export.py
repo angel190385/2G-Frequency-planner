@@ -10,6 +10,13 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+try:
+    import PyQt6.QtWebEngineWidgets  # Must be imported before QApplication is created
+except ImportError:
+    pass
+
+from PyQt6.QtWidgets import QApplication
+
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborGraph, NeighborRelation
 from src.models.frequency_plan import FrequencyAssignment, PlanResult, Violation
@@ -22,6 +29,12 @@ from src.io.auto_export import (
 
 
 class TestAutoExport(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        from PyQt6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication(sys.argv)
+        cls.app.setQuitOnLastWindowClosed(False)
 
     def setUp(self):
         # Create test stations and cells
@@ -243,7 +256,60 @@ class TestAutoExport(unittest.TestCase):
 
         win.close()
 
+    def test_recalculate_all_tch_and_recalculate_all_buttons(self):
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt
+        from src.ui.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = MainWindow()
+        win.cells = self.cells
+        win.neighbor_graph = self.neighbor_graph
+        win.rules = self.rules
+        win._refresh_calc_table()
+
+        # 1. Test 'Recalcular todos los TCH'
+        win.btn_recalc_all_tch.click()
+
+        for row in range(win.calc_table.rowCount()):
+            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, 7).text(), "1,2")
+
+        self.assertFalse(self.c1.recalculate_bcch)
+        self.assertEqual(self.c1.tch_indices_to_recalculate, [0, 1])
+        self.assertTrue(self.c1.needs_calculation)
+
+        self.assertFalse(self.c2.recalculate_bcch)
+        self.assertEqual(self.c2.tch_indices_to_recalculate, [0, 1])
+        self.assertTrue(self.c2.needs_calculation)
+
+        self.assertEqual(win.lbl_calc_cells.text(), "2 celdas seleccionadas")
+        self.assertEqual(win.lbl_calc_vars.text(), "4 variables a optimizar")
+
+        # 2. Test 'Recalcular todo'
+        win.btn_recalc_all.click()
+
+        for row in range(win.calc_table.rowCount()):
+            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, 7).text(), "1,2")
+
+        self.assertTrue(self.c1.recalculate_bcch)
+        self.assertEqual(self.c1.tch_indices_to_recalculate, [0, 1])
+        self.assertTrue(self.c1.needs_calculation)
+
+        self.assertTrue(self.c2.recalculate_bcch)
+        self.assertEqual(self.c2.tch_indices_to_recalculate, [0, 1])
+        self.assertTrue(self.c2.needs_calculation)
+
+        self.assertEqual(win.lbl_calc_cells.text(), "2 celdas seleccionadas")
+        self.assertEqual(win.lbl_calc_vars.text(), "6 variables a optimizar")
+
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

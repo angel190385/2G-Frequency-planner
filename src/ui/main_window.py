@@ -267,13 +267,23 @@ class MainWindow(QMainWindow):
 
         # Quick actions
         quick_layout = QHBoxLayout()
-        btn_select_all = QPushButton("Seleccionar todo")
-        btn_select_all.clicked.connect(self._select_all_cells)
-        quick_layout.addWidget(btn_select_all)
+        self.btn_select_all = QPushButton("Seleccionar todo")
+        self.btn_select_all.clicked.connect(self._select_all_cells)
+        quick_layout.addWidget(self.btn_select_all)
 
-        btn_deselect_all = QPushButton("Deseleccionar todo")
-        btn_deselect_all.clicked.connect(self._deselect_all_cells)
-        quick_layout.addWidget(btn_deselect_all)
+        self.btn_deselect_all = QPushButton("Deseleccionar todo")
+        self.btn_deselect_all.clicked.connect(self._deselect_all_cells)
+        quick_layout.addWidget(self.btn_deselect_all)
+
+        self.btn_recalc_all_tch = QPushButton("Recalcular todos los TCH")
+        self.btn_recalc_all_tch.setToolTip("Marca 'Recalc' de todas las celdas y selecciona todos los TCH existentes para recalcular.")
+        self.btn_recalc_all_tch.clicked.connect(self._recalculate_all_tch)
+        quick_layout.addWidget(self.btn_recalc_all_tch)
+
+        self.btn_recalc_all = QPushButton("Recalcular todo")
+        self.btn_recalc_all.setToolTip("Marca 'Recalc', 'Recalc BCCH' y todos los TCH para todas las celdas.")
+        self.btn_recalc_all.clicked.connect(self._recalculate_all)
+        quick_layout.addWidget(self.btn_recalc_all)
 
         quick_layout.addStretch()
         left_layout.addLayout(quick_layout)
@@ -557,6 +567,7 @@ class MainWindow(QMainWindow):
             if item:
                 item.setCheckState(Qt.CheckState.Checked)
         self.calc_table.blockSignals(False)
+        self._apply_calc_selections()
         self._on_calc_selection_changed()
 
     def _deselect_all_cells(self):
@@ -566,6 +577,79 @@ class MainWindow(QMainWindow):
             if item:
                 item.setCheckState(Qt.CheckState.Unchecked)
         self.calc_table.blockSignals(False)
+        self._apply_calc_selections()
+        self._on_calc_selection_changed()
+
+    def _recalculate_all_tch(self):
+        """Mark 'Recalc' for all cells and set all existing TCHs to be recalculated (without BCCH)."""
+        self.calc_table.blockSignals(True)
+        for row in range(self.calc_table.rowCount()):
+            # 1. Col 0: Recalc checked
+            item_recalc = self.calc_table.item(row, 0)
+            if item_recalc:
+                item_recalc.setCheckState(Qt.CheckState.Checked)
+
+            # 2. Col 5: Recalc BCCH unchecked (only TCHs)
+            item_bcch = self.calc_table.item(row, 5)
+            if item_bcch:
+                item_bcch.setCheckState(Qt.CheckState.Unchecked)
+
+            # 3. Col 7: Mark all TCHs (1-based indices)
+            cell_id_item = self.calc_table.item(row, 1)
+            cid = cell_id_item.text().strip() if cell_id_item else ""
+            cell = self.cells.get(cid)
+            if cell and cell.tch_list:
+                all_tch_str = ",".join(str(i + 1) for i in range(len(cell.tch_list)))
+            else:
+                tch_item_col6 = self.calc_table.item(row, 6)
+                if tch_item_col6 and tch_item_col6.text().strip() and tch_item_col6.text().strip() != "—":
+                    count = len([x for x in tch_item_col6.text().split(",") if x.strip()])
+                    all_tch_str = ",".join(str(i + 1) for i in range(count))
+                else:
+                    all_tch_str = ""
+
+            item_tch = self.calc_table.item(row, 7)
+            if item_tch:
+                item_tch.setText(all_tch_str)
+
+        self.calc_table.blockSignals(False)
+        self._apply_calc_selections()
+        self._on_calc_selection_changed()
+
+    def _recalculate_all(self):
+        """Mark 'Recalc', 'Recalc BCCH', and all existing TCHs for all cells."""
+        self.calc_table.blockSignals(True)
+        for row in range(self.calc_table.rowCount()):
+            # 1. Col 0: Recalc checked
+            item_recalc = self.calc_table.item(row, 0)
+            if item_recalc:
+                item_recalc.setCheckState(Qt.CheckState.Checked)
+
+            # 2. Col 5: Recalc BCCH checked
+            item_bcch = self.calc_table.item(row, 5)
+            if item_bcch:
+                item_bcch.setCheckState(Qt.CheckState.Checked)
+
+            # 3. Col 7: Mark all TCHs (1-based indices)
+            cell_id_item = self.calc_table.item(row, 1)
+            cid = cell_id_item.text().strip() if cell_id_item else ""
+            cell = self.cells.get(cid)
+            if cell and cell.tch_list:
+                all_tch_str = ",".join(str(i + 1) for i in range(len(cell.tch_list)))
+            else:
+                tch_item_col6 = self.calc_table.item(row, 6)
+                if tch_item_col6 and tch_item_col6.text().strip() and tch_item_col6.text().strip() != "—":
+                    count = len([x for x in tch_item_col6.text().split(",") if x.strip()])
+                    all_tch_str = ",".join(str(i + 1) for i in range(count))
+                else:
+                    all_tch_str = ""
+
+            item_tch = self.calc_table.item(row, 7)
+            if item_tch:
+                item_tch.setText(all_tch_str)
+
+        self.calc_table.blockSignals(False)
+        self._apply_calc_selections()
         self._on_calc_selection_changed()
 
     def _import_data(self, import_type: str):
