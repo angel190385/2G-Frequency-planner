@@ -6,15 +6,13 @@ zone-specific neighbors/handovers, and algorithm rules.
 import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QGroupBox, QCheckBox, QSpinBox, QLineEdit,
+    QGroupBox, QCheckBox, QSpinBox, QLineEdit,
     QMessageBox, QGridLayout
 )
 from PyQt6.QtCore import Qt
 
 from src.models.zone import OptimizationZone
 from src.ui.dialogs.rules_dialog import RulesDialog
-from src.io.data_loader import load_neighbors, load_handovers
-from src.models.neighbor import NeighborGraph
 from src.ui.styles import Colors
 
 
@@ -28,7 +26,7 @@ class ZoneConfigDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle(f"Configuración de {self.zone.name}")
-        self.setMinimumSize(480, 420)
+        self.setMinimumSize(460, 290)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -71,38 +69,6 @@ class ZoneConfigDialog(QDialog):
 
         layout.addWidget(freq_group)
 
-        # Zone-specific Neighbors & Handovers
-        nh_group = QGroupBox("Vecindades y Traspasos de esta Zona (Opcional)")
-        nh_layout = QVBoxLayout(nh_group)
-
-        lbl_nh_info = QLabel(
-            "Si dispones de la matriz de adyacencias o contadores HO para esta zona, cárgalos aquí.\n"
-            "Si no los cargas, la zona utilizará la penalización espacial de distancia para protegerse."
-        )
-        lbl_nh_info.setStyleSheet("color: #8888a0; font-size: 11px;")
-        lbl_nh_info.setWordWrap(True)
-        nh_layout.addWidget(lbl_nh_info)
-
-        btn_nh_layout = QHBoxLayout()
-        self.lbl_nh_status = QLabel("Sin vecindades específicas")
-        if self.zone.neighbor_graph:
-            self.lbl_nh_status.setText(f"✅ {len(self.zone.neighbor_graph.all_relations())} relaciones cargadas")
-            self.lbl_nh_status.setStyleSheet("color: #00d4aa; font-weight: bold;")
-        else:
-            self.lbl_nh_status.setStyleSheet("color: #8888a0; font-style: italic;")
-        btn_nh_layout.addWidget(self.lbl_nh_status, 1)
-
-        btn_load_nh = QPushButton("📁 Cargar Vecinas...")
-        btn_load_nh.clicked.connect(self._load_zone_neighbors)
-        btn_nh_layout.addWidget(btn_load_nh)
-
-        btn_load_ho = QPushButton("📡 Cargar HO...")
-        btn_load_ho.clicked.connect(self._load_zone_handovers)
-        btn_nh_layout.addWidget(btn_load_ho)
-
-        nh_layout.addLayout(btn_nh_layout)
-        layout.addWidget(nh_group)
-
         # Algorithm rules for this zone
         rules_group = QGroupBox("Parámetros del Algoritmo Genético")
         rg_layout = QHBoxLayout(rules_group)
@@ -140,44 +106,6 @@ class ZoneConfigDialog(QDialog):
         dlg = RulesDialog(self.zone.rules, self)
         if dlg.exec():
             self.zone.rules = dlg.get_rules()
-
-    def _load_zone_neighbors(self):
-        """Load neighbor file specifically for this zone."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, f"Cargar Vecinas para {self.zone.name}",
-            "", "Archivos CSV (*.csv *.txt);;Todos (*.*)"
-        )
-        if path:
-            try:
-                relations, _ = load_neighbors(path)
-                ng = NeighborGraph()
-                for r in relations:
-                    ng.add_relation(r)
-                self.zone.neighbor_graph = ng
-                self.zone.neighbors_file_path = path
-                self.lbl_nh_status.setText(f"✅ {len(relations)} relaciones cargadas")
-                self.lbl_nh_status.setStyleSheet("color: #00d4aa; font-weight: bold;")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error al cargar vecinas:\n{str(e)}")
-
-    def _load_zone_handovers(self):
-        """Load handovers file specifically for this zone."""
-        if not self.zone.neighbor_graph:
-            QMessageBox.warning(self, "Atención", "Debes cargar primero las vecindades de la zona antes de los handovers.")
-            return
-
-        path, _ = QFileDialog.getOpenFileName(
-            self, f"Cargar Handovers para {self.zone.name}",
-            "", "Archivos CSV (*.csv *.txt);;Todos (*.*)"
-        )
-        if path:
-            try:
-                ho_data, _ = load_handovers(path)
-                matched = self.zone.neighbor_graph.update_from_handover_data(ho_data)
-                self.zone.handovers_file_path = path
-                QMessageBox.information(self, "Handovers", f"Se han actualizado {matched} relaciones con datos de traspaso.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error al cargar handovers:\n{str(e)}")
 
     def _save_changes(self):
         name = self.txt_name.text().strip()
