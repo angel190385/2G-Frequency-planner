@@ -19,12 +19,12 @@ class ImportDialog(QDialog):
 
     def _setup_ui(self):
         titles = {
-            "cells": "Importar Celdas",
+            "cells": "Importar Celdas (cells.csv / cells_extended.csv)",
             "neighbors": "Importar Vecindades",
             "handovers": "Importar Handovers",
         }
         self.setWindowTitle(titles.get(self.import_type, "Importar"))
-        self.setMinimumSize(500, 350)
+        self.setMinimumSize(500, 360)
 
         layout = QVBoxLayout(self)
 
@@ -35,15 +35,17 @@ class ImportDialog(QDialog):
         formats = {
             "cells": (
                 "Archivo CSV o Excel con las siguientes columnas:\n\n"
-                "  station_id  - Identificador de la estación\n"
+                "  station_id   - Identificador de la estación\n"
                 "  station_name - Nombre de la estación\n"
-                "  lat         - Latitud\n"
-                "  lon         - Longitud\n"
-                "  cell_id     - Identificador de la celda\n"
-                "  sector      - Sector (A, B, C...)\n"
-                "  bcch        - Frecuencia BCCH\n"
-                "  tch1, tch2... - Frecuencias TCH\n\n"
-                "Separadores: coma (,) o punto y coma (;)"
+                "  lat          - Latitud\n"
+                "  lon          - Longitud\n"
+                "  cell_id      - Identificador de la celda\n"
+                "  sector       - Sector (A, B, C...)\n"
+                "  azimuth      - Azimut en grados (0..360)\n"
+                "  bcch         - Frecuencia BCCH\n"
+                "  tch1, tch2...- Frecuencias TCH\n\n"
+                "Compatible con cells.csv y cells_extended.csv.\n"
+                "Separadores: punto y coma (;) o coma (,)."
             ),
             "neighbors": (
                 "Archivo CSV o Excel con las siguientes columnas:\n\n"

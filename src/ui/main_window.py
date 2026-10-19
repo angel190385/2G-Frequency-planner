@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
         # ── Tab 5: Interactive Map ────────────────────────────────
         self.map_widget = MapWidget()
         self.map_widget.cluster_optimization_completed.connect(self._on_cluster_optimization_completed)
+        self.map_widget.zone_selection_applied.connect(self._on_zone_selection_applied)
         self.tabs.addTab(self.map_widget, "🗺️ Mapa de Frecuencias")
 
         main_layout.addWidget(self.tabs)
@@ -701,10 +702,14 @@ class MainWindow(QMainWindow):
                 self.cells = cells
                 self.stations = stations
                 self.cell_table.load_cells(cells)
+                self._update_calc_table()
                 self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                fname = os.path.basename(file_path)
                 self.status_label.setText(
-                    f"Celdas importadas: {len(cells)} celdas de "
-                    f"{len(stations)} estaciones")
+                    f"Celdas importadas ({fname}): {len(cells)} celdas de {len(stations)} estaciones"
+                )
+                # Automatically direct user to the map tab to select a subset of cells
+                self.tabs.setCurrentWidget(self.map_widget)
 
             elif import_type == "neighbors":
                 graph, warnings = load_neighbors(file_path, self.cells)
@@ -793,6 +798,13 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             print("Error exporting cluster bundle:", e)
+
+    def _on_zone_selection_applied(self):
+        """Called when polygon zones selection is applied to the Calculation table."""
+        self._update_calc_table()
+        # Switch to calculation tab (tab index 2)
+        self.tabs.setCurrentIndex(2)
+        self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo")
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""

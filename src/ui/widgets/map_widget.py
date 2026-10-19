@@ -53,6 +53,7 @@ class MapWidget(QWidget):
     and interactive polygon drawing for sequential zone optimization.
     """
     cluster_optimization_completed = pyqtSignal(dict, dict)  # (zone_results, updated_cells)
+    zone_selection_applied = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -253,6 +254,23 @@ class MapWidget(QWidget):
         fl.addWidget(self.spin_frontier)
         fl.addStretch()
         layout.addWidget(frontier_box)
+
+        # Apply selection to Calculation tab button
+        self.btn_apply_to_calc = QPushButton("☑️ Aplicar Selección a Tabla de Cálculo")
+        self.btn_apply_to_calc.setToolTip("Aplica las celdas de estos polígonos como celdas a recalcular en la pestaña 'Cálculo'")
+        self.btn_apply_to_calc.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #38bdf8;
+                border: 1px solid #38bdf8;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 7px;
+            }
+            QPushButton:hover { background-color: #38bdf8; color: #0f172a; }
+        """)
+        self.btn_apply_to_calc.clicked.connect(self._apply_zones_to_calc_table)
+        layout.addWidget(self.btn_apply_to_calc)
 
         # Sequential run button
         self.btn_run_sequential = QPushButton("🚀 Ejecutar Optimización Secuencial")
@@ -836,6 +854,44 @@ class MapWidget(QWidget):
         self._refresh_zones_on_map()
         self._update_zones_table()
         self._refresh_map()
+
+    def _apply_zones_to_calc_table(self):
+        """Apply the cells of the defined zones to the main Calculation table."""
+        if not self.zones:
+            QMessageBox.warning(self, "Sin zonas", "Debes trazar al menos un polígono de zona en el mapa.")
+            return
+
+        total_cells_in_zones = sum(z.cell_count for z in self.zones)
+        if total_cells_in_zones == 0:
+            QMessageBox.warning(self, "Zonas vacías", "Ninguna de las zonas definidas contiene celdas.")
+            return
+
+        # Reset all cells
+        for c in self.cells.values():
+            c.recalculate_bcch = False
+            c.tch_indices_to_recalculate = []
+            c.new_tch_count = 0
+
+        # Mark cells inside zones
+        selected_count = 0
+        for z in self.zones:
+            for cid in z.cell_ids:
+                if cid in self.cells:
+                    c = self.cells[cid]
+                    c.recalculate_bcch = z.recalculate_bcch
+                    if z.recalculate_tch:
+                        c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
+                    else:
+                        c.tch_indices_to_recalculate = []
+                    c.new_tch_count = z.new_tch_count
+                    selected_count += 1
+
+        self.zone_selection_applied.emit()
+        QMessageBox.information(
+            self, "Selección Aplicada a Cálculo",
+            f"Se han seleccionado {selected_count} celdas correspondientes a las zonas definidas.\n"
+            "La tabla de la pestaña 'Cálculo' se ha actualizado con este subconjunto."
+        )
 
     def _run_cluster_optimization(self):
         """Launch the sequential cluster optimization."""
