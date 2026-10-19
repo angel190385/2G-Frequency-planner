@@ -99,7 +99,8 @@ class ClusterOptimizer:
         global_neighbor_graph: Optional[NeighborGraph] = None,
         progress_callback: Optional[Callable[[ZoneOptimizationProgress], None]] = None,
         frontier_distance_km: float = 8.0,
-        max_workers: Optional[int] = None
+        max_workers: Optional[int] = None,
+        respect_cell_flags: bool = False
     ):
         self.cells = copy.deepcopy(cells)
         # Sort zones by execution_order
@@ -108,6 +109,7 @@ class ClusterOptimizer:
         self.progress_callback = progress_callback
         self.frontier_distance_km = frontier_distance_km
         self.max_workers = max_workers
+        self.respect_cell_flags = respect_cell_flags
         self._cancelled = False
         self._current_optimizer: Optional[FrequencyOptimizer] = None
 
@@ -152,22 +154,31 @@ class ClusterOptimizer:
 
             # Add active cells with zone recalculation config
             for cid in active_cell_ids:
+                if cid not in self.cells:
+                    continue
                 c = copy.deepcopy(self.cells[cid])
-                c.recalculate_bcch = zone.recalculate_bcch
-                if zone.recalculate_tch:
-                    c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
-                else:
-                    c.tch_indices_to_recalculate = []
-                c.new_tch_count = zone.new_tch_count
+                if not self.respect_cell_flags:
+                    c.recalculate_bcch = zone.recalculate_bcch
+                    if zone.recalculate_tch:
+                        c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
+                    else:
+                        c.tch_indices_to_recalculate = []
+                    c.new_tch_count = zone.new_tch_count
                 cells_to_eval[cid] = c
+
+            if self.respect_cell_flags:
+                if not any(cells_to_eval[cid].needs_calculation for cid in active_cell_ids if cid in cells_to_eval):
+                    zone.status = "Omitida (Sin celdas a recalcular)"
+                    continue
 
             # Add frontier cells as strictly FIXED
             for fid in frontier_ids:
-                c = copy.deepcopy(self.cells[fid])
-                c.recalculate_bcch = False
-                c.tch_indices_to_recalculate = []
-                c.new_tch_count = 0
-                cells_to_eval[fid] = c
+                if fid in self.cells:
+                    c = copy.deepcopy(self.cells[fid])
+                    c.recalculate_bcch = False
+                    c.tch_indices_to_recalculate = []
+                    c.new_tch_count = 0
+                    cells_to_eval[fid] = c
 
             # Build neighbor graph: zone specific, or fallback to global filtered
             ng = zone.neighbor_graph
@@ -243,7 +254,8 @@ class ClusterOptimizerThread(QThread):
         zones: list[OptimizationZone],
         global_neighbor_graph: Optional[NeighborGraph] = None,
         frontier_distance_km: float = 8.0,
-        max_workers: Optional[int] = None
+        max_workers: Optional[int] = None,
+        respect_cell_flags: bool = False
     ):
         super().__init__()
         self.cells = cells
@@ -251,6 +263,7 @@ class ClusterOptimizerThread(QThread):
         self.global_neighbor_graph = global_neighbor_graph
         self.frontier_distance_km = frontier_distance_km
         self.max_workers = max_workers
+        self.respect_cell_flags = respect_cell_flags
         self.optimizer: Optional[ClusterOptimizer] = None
 
     def run(self):
@@ -264,14 +277,25 @@ class ClusterOptimizerThread(QThread):
                 global_neighbor_graph=self.global_neighbor_graph,
                 progress_callback=_progress_cb,
                 frontier_distance_km=self.frontier_distance_km,
-                max_workers=self.max_workers
+                max_workers=self.max_workers,
+                respect_cell_flags=self.respect_cell_flags
             )
 
             # We can also track when each zone completes
             zone_results = {}
             total_zones = len(self.zones)
             sorted_zones = sorted(self.zones, key=lambda z: z.execution_order)
-            total_global_runs = sum(getattr(z.rules, "num_runs", 1) for z in sorted_zones if z.cell_ids)
+
+            # Determine valid zones that actually have active calculation variables
+            if self.respect_cell_flags:
+                valid_zones = [
+                    z for z in sorted_zones
+                    if any(self.optimizer.cells.get(cid) and self.optimizer.cells[cid].needs_calculation for cid in z.cell_ids)
+                ]
+            else:
+                valid_zones = [z for z in sorted_zones if z.cell_ids]
+
+            total_global_runs = sum(getattr(z.rules, "num_runs", 1) for z in valid_zones)
             if total_global_runs == 0:
                 total_global_runs = max(1, sum(getattr(z.rules, "num_runs", 1) for z in sorted_zones))
 
@@ -282,7 +306,29 @@ class ClusterOptimizerThread(QThread):
                 active_cell_ids = zone.cell_ids
                 if not active_cell_ids:
                     zone.status = "Omitida (Sin celdas)"
+                    self.zone_completed.emit(zone.name, 0.0, 0)
                     continue
+
+                cells_to_eval: dict[str, Cell] = {}
+                for cid in active_cell_ids:
+                    if cid not in self.optimizer.cells:
+                        continue
+                    c = copy.deepcopy(self.optimizer.cells[cid])
+                    if not self.respect_cell_flags:
+                        c.recalculate_bcch = zone.recalculate_bcch
+                        if zone.recalculate_tch:
+                            c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
+                        else:
+                            c.tch_indices_to_recalculate = []
+                        c.new_tch_count = zone.new_tch_count
+                    cells_to_eval[cid] = c
+
+                if self.respect_cell_flags:
+                    active_calc_cells = [cid for cid in active_cell_ids if cid in cells_to_eval and cells_to_eval[cid].needs_calculation]
+                    if not active_calc_cells:
+                        zone.status = "Omitida (Sin celdas a recalcular)"
+                        self.zone_completed.emit(zone.name, 0.0, 0)
+                        continue
 
                 zone.status = "Optimizando"
 
@@ -293,23 +339,13 @@ class ClusterOptimizerThread(QThread):
                     neighbor_graph=zone.neighbor_graph or self.global_neighbor_graph
                 )
 
-                cells_to_eval: dict[str, Cell] = {}
-                for cid in active_cell_ids:
-                    c = copy.deepcopy(self.optimizer.cells[cid])
-                    c.recalculate_bcch = zone.recalculate_bcch
-                    if zone.recalculate_tch:
-                        c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
-                    else:
-                        c.tch_indices_to_recalculate = []
-                    c.new_tch_count = zone.new_tch_count
-                    cells_to_eval[cid] = c
-
                 for fid in frontier_ids:
-                    c = copy.deepcopy(self.optimizer.cells[fid])
-                    c.recalculate_bcch = False
-                    c.tch_indices_to_recalculate = []
-                    c.new_tch_count = 0
-                    cells_to_eval[fid] = c
+                    if fid in self.optimizer.cells:
+                        c = copy.deepcopy(self.optimizer.cells[fid])
+                        c.recalculate_bcch = False
+                        c.tch_indices_to_recalculate = []
+                        c.new_tch_count = 0
+                        cells_to_eval[fid] = c
 
                 ng = zone.neighbor_graph
                 if not ng:

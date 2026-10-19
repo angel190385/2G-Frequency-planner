@@ -12,12 +12,15 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QBrush
 
 import os
+import copy
 from datetime import datetime
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborGraph
+from src.models.zone import OptimizationZone
 from src.models.frequency_plan import PlanResult, format_number
 from src.engine.constraints import FrequencyRules, STATISTICAL_MODELS
 from src.engine.optimizer import FrequencyOptimizer
+from src.engine.cluster_optimizer import ClusterOptimizerThread
 from src.engine.hardware import get_hardware_profile
 from src.io.data_loader import (
     load_cells, load_neighbors, load_handovers, export_results
@@ -35,6 +38,7 @@ from src.ui.dialogs.planner_import_dialog import PlannerImportDialog
 from src.ui.dialogs.rules_dialog import RulesDialog
 from src.ui.dialogs.range_adaptation_dialog import RangeAdaptationDialog
 from src.ui.dialogs.convergence_dialog import ConvergenceDialog
+from src.ui.dialogs.cluster_progress_dialog import ClusterProgressDialog
 
 
 class OptimizerThread(QThread):
@@ -106,6 +110,8 @@ class MainWindow(QMainWindow):
         self.rules = FrequencyRules()
         self.results: list[PlanResult] = []
         self._optimizer_thread: OptimizerThread | None = None
+        self._cluster_thread: ClusterOptimizerThread | None = None
+        self._zones_applied_to_calc: bool = False
 
         self._setup_menu()
         self._setup_ui()
@@ -356,25 +362,35 @@ class MainWindow(QMainWindow):
         cg_layout.addWidget(self.lbl_calc_cells, 0, 0, 1, 2)
         cg_layout.addWidget(self.lbl_calc_vars, 1, 0, 1, 2)
 
-        cg_layout.addWidget(QLabel("Número de ejecuciones:"), 2, 0)
+        self.chk_sequential_zones = QCheckBox("Optimización secuencial por zonas")
+        self.chk_sequential_zones.setChecked(False)
+        self.chk_sequential_zones.setToolTip(
+            "Si está activado y hay zonas definidas, ejecuta la optimización secuencialmente zona por zona\n"
+            "protegiendo las fronteras de interferencia de la red.\n"
+            "Se activa automáticamente al pulsar 'Aplicar Selección a Tabla de Cálculo' en el mapa."
+        )
+        self.chk_sequential_zones.toggled.connect(self._on_sequential_mode_toggled)
+        cg_layout.addWidget(self.chk_sequential_zones, 2, 0, 1, 2)
+
+        cg_layout.addWidget(QLabel("Número de ejecuciones:"), 3, 0)
         self.spin_calc_num_runs = QSpinBox()
         self.spin_calc_num_runs.setRange(1, 20)
         self.spin_calc_num_runs.setValue(self.rules.num_runs)
         self.spin_calc_num_runs.valueChanged.connect(self._on_calc_num_runs_changed)
-        cg_layout.addWidget(self.spin_calc_num_runs, 2, 1)
+        cg_layout.addWidget(self.spin_calc_num_runs, 3, 1)
 
         # Multi-core hardware profiling
         hw = get_hardware_profile()
-        cg_layout.addWidget(QLabel("Procesos CPU paralelos:"), 3, 0)
+        cg_layout.addWidget(QLabel("Procesos CPU paralelos:"), 4, 0)
         self.spin_calc_workers = QSpinBox()
         self.spin_calc_workers.setRange(1, max(32, hw.cpu_count))
         self.spin_calc_workers.setValue(hw.recommended_workers)
         self.spin_calc_workers.setToolTip("Aprovecha el 100% de la CPU distribuyendo el cálculo en todos los núcleos.")
-        cg_layout.addWidget(self.spin_calc_workers, 3, 1)
+        cg_layout.addWidget(self.spin_calc_workers, 4, 1)
 
         self.lbl_hw_info = QLabel(hw.summary_detailed)
         self.lbl_hw_info.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 11px; padding-top: 4px;")
-        cg_layout.addWidget(self.lbl_hw_info, 4, 0, 1, 2)
+        cg_layout.addWidget(self.lbl_hw_info, 5, 0, 1, 2)
 
         right_layout.addWidget(calc_group)
 
@@ -583,15 +599,33 @@ class MainWindow(QMainWindow):
 
     _update_calc_table = _refresh_calc_table
 
+    def _on_sequential_mode_toggled(self, checked: bool):
+        self._update_calc_button_text()
+        self._on_calc_selection_changed()
+
+    def _update_calc_button_text(self):
+        has_zones = hasattr(self, "zone_map_widget") and bool(self.zone_map_widget.zones)
+        is_seq = getattr(self, "chk_sequential_zones", None) and self.chk_sequential_zones.isChecked()
+        if is_seq and has_zones:
+            self.btn_calculate.setText("🚀 CALCULAR FRECUENCIAS (Secuencial)")
+            self.btn_calculate.setToolTip("Ejecuta la optimización secuencial respetando las zonas y protegiendo las fronteras de interferencia.")
+        else:
+            self.btn_calculate.setText("🚀 CALCULAR FRECUENCIAS")
+            self.btn_calculate.setToolTip("Ejecuta la optimización global sobre todas las celdas seleccionadas.")
+
     def _on_calc_selection_changed(self):
         """Update stats when cell selection changes."""
         selected = 0
         total_vars = 0
+        selected_cell_ids = set()
 
         for row in range(self.calc_table.rowCount()):
             recalc_item = self.calc_table.item(row, self.COL_RECALC)
             if recalc_item and recalc_item.checkState() == Qt.CheckState.Checked:
                 selected += 1
+                cell_id_item = self.calc_table.item(row, self.COL_CELL_ID)
+                if cell_id_item:
+                    selected_cell_ids.add(cell_id_item.text().strip())
 
                 # Count BCCH
                 bcch_item = self.calc_table.item(row, self.COL_RECALC_BCCH)
@@ -613,7 +647,17 @@ class MainWindow(QMainWindow):
                     except ValueError:
                         pass
 
-        self.lbl_calc_cells.setText(f"{selected} celdas seleccionadas")
+        # Count active zones among selected cells
+        active_zone_names = set()
+        if hasattr(self, "zone_map_widget") and self.zone_map_widget and self.zone_map_widget.zones:
+            for z in self.zone_map_widget.zones:
+                if any(cid in selected_cell_ids for cid in z.cell_ids):
+                    active_zone_names.add(z.name)
+
+        if active_zone_names and getattr(self, "chk_sequential_zones", None) and self.chk_sequential_zones.isChecked():
+            self.lbl_calc_cells.setText(f"{selected} celdas seleccionadas ({len(active_zone_names)} zonas)")
+        else:
+            self.lbl_calc_cells.setText(f"{selected} celdas seleccionadas")
         self.lbl_calc_vars.setText(f"{total_vars} variables a optimizar")
 
     def _select_all_cells(self):
@@ -854,10 +898,14 @@ class MainWindow(QMainWindow):
 
     def _on_zone_selection_applied(self):
         """Called when polygon zones selection is applied to the Calculation table."""
+        self._zones_applied_to_calc = True
+        if hasattr(self, "chk_sequential_zones"):
+            self.chk_sequential_zones.setChecked(True)
+        self._update_calc_button_text()
         self._refresh_calc_table()
         # Switch to calculation tab
         self.tabs.setCurrentWidget(self.calc_tab_widget)
-        self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo")
+        self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo secuencial")
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""
@@ -923,7 +971,76 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Prepare: we pass ALL cells (for context) but only some have variables
+        is_sequential = (
+            getattr(self, "chk_sequential_zones", None)
+            and self.chk_sequential_zones.isChecked()
+            and hasattr(self, "zone_map_widget")
+            and bool(self.zone_map_widget.zones)
+        )
+
+        if is_sequential:
+            active_zones = []
+            assigned_calc_cell_ids = set()
+
+            for z in self.zone_map_widget.zones:
+                matching = [cid for cid in z.cell_ids if cid in cells_to_calc]
+                if matching:
+                    active_zones.append(z)
+                    assigned_calc_cell_ids.update(matching)
+
+            unassigned_cids = set(cells_to_calc.keys()) - assigned_calc_cell_ids
+            if unassigned_cids:
+                manual_zone = OptimizationZone(
+                    zone_id="__manual_cells__",
+                    name="Celdas Fuera de Zona",
+                    cell_ids=unassigned_cids,
+                    execution_order=len(active_zones) + 1,
+                    rules=copy.deepcopy(self.rules)
+                )
+                active_zones.append(manual_zone)
+
+            if not active_zones:
+                QMessageBox.warning(
+                    self, "Sin celdas en zonas",
+                    "No se encontraron celdas a recalcular dentro de las zonas definidas."
+                )
+                return
+
+            runs = self.spin_calc_num_runs.value()
+            for z in active_zones:
+                if not hasattr(z, "rules") or not z.rules:
+                    z.rules = copy.deepcopy(self.rules)
+                z.rules.num_runs = runs
+
+            workers = getattr(self, "spin_calc_workers", None)
+            max_workers = workers.value() if workers else None
+            frontier_dist = self.zone_map_widget.spin_frontier.value() if hasattr(self.zone_map_widget, "spin_frontier") else 8.0
+
+            self.btn_calculate.setEnabled(False)
+            self._calc_start_time = datetime.now()
+            self.lbl_progress.setText(f"⏳ Optimizando secuencialmente ({len(active_zones)} zonas, {runs} ejecuciones)...")
+            self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
+
+            self.cluster_dialog = ClusterProgressDialog(total_zones=len(active_zones), parent=self)
+            self.cluster_dialog.show()
+
+            self._cluster_thread = ClusterOptimizerThread(
+                cells=self.cells,
+                zones=active_zones,
+                global_neighbor_graph=self.neighbor_graph,
+                frontier_distance_km=frontier_dist,
+                max_workers=max_workers,
+                respect_cell_flags=True
+            )
+            self._cluster_thread.progress.connect(self.cluster_dialog.update_progress)
+            self._cluster_thread.zone_completed.connect(self.cluster_dialog.log_zone_completed)
+            self._cluster_thread.finished.connect(self._on_calc_sequential_finished)
+            self._cluster_thread.error.connect(self._on_calc_sequential_error)
+            self.cluster_dialog.cancelled.connect(self._cluster_thread.cancel)
+            self._cluster_thread.start()
+            return
+
+        # Monolithic global optimization
         self.btn_calculate.setEnabled(False)
         self._calc_start_time = datetime.now()
         self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")
@@ -949,9 +1066,30 @@ class MainWindow(QMainWindow):
         self._optimizer_thread.error.connect(self._on_optimization_error)
         self._optimizer_thread.start()
 
+    def _on_calc_sequential_finished(self, zone_results: dict, updated_cells: dict):
+        self.btn_calculate.setEnabled(True)
+        if hasattr(self, "cluster_dialog") and self.cluster_dialog:
+            self.cluster_dialog.accept()
+        self._on_cluster_optimization_completed(zone_results, updated_cells)
+        self.lbl_progress.setText("✅ Optimización secuencial por zonas completada")
+        self.lbl_progress.setStyleSheet(f"color: {Colors.ACCENT}; font-weight: bold;")
+
+    def _on_calc_sequential_error(self, err_msg: str):
+        self.btn_calculate.setEnabled(True)
+        if hasattr(self, "cluster_dialog") and self.cluster_dialog:
+            self.cluster_dialog.reject()
+        self.lbl_progress.setText("❌ Error en optimización secuencial")
+        self.lbl_progress.setStyleSheet(f"color: {Colors.ERROR}; font-weight: bold;")
+        QMessageBox.critical(self, "Error de Optimización Secuencial", f"Ocurrió un error:\n{err_msg}")
+
     def _cancel_calculation(self):
         """Cancel the running optimization."""
-        if self._optimizer_thread:
+        if hasattr(self, "_cluster_thread") and self._cluster_thread and self._cluster_thread.isRunning():
+            self._was_cancelled = True
+            self._cluster_thread.cancel()
+            self.lbl_progress.setText("⏹️ Cancelando cálculo secuencial...")
+            self.lbl_progress.setStyleSheet(f"color: {Colors.WARNING}; font-weight: bold;")
+        elif self._optimizer_thread and self._optimizer_thread.isRunning():
             self._was_cancelled = True
             self._optimizer_thread.cancel()
             self.lbl_progress.setText("⏹️ Cancelando cálculo y recuperando resultados...")

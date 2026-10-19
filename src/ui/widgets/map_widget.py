@@ -996,6 +996,7 @@ class MapWidget(QWidget):
                     c.new_tch_count = z.new_tch_count
                     selected_count += 1
 
+        self._selection_applied_to_calc = True
         self.zone_selection_applied.emit()
         QMessageBox.information(
             self, "Selección Aplicada a Cálculo",
@@ -1036,12 +1037,14 @@ class MapWidget(QWidget):
                 if not hasattr(z.rules, "num_runs") or z.rules.num_runs <= 0:
                     z.rules.num_runs = runs
 
+        respect_flags = getattr(self, "_selection_applied_to_calc", False)
         self.cluster_thread = ClusterOptimizerThread(
             cells=self.cells,
             zones=self.zones,
             global_neighbor_graph=self.neighbor_graph,
             frontier_distance_km=frontier_dist,
-            max_workers=workers
+            max_workers=workers,
+            respect_cell_flags=respect_flags
         )
 
         self.cluster_thread.progress.connect(self.cluster_dialog.update_progress)

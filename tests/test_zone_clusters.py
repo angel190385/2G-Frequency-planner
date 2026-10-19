@@ -135,6 +135,69 @@ class TestZoneClusters(unittest.TestCase):
         self.assertEqual(z1.status, "Completada")
         self.assertEqual(z2.status, "Completada")
 
+    def test_cluster_optimizer_respects_cell_flags(self):
+        """
+        Test that when respect_cell_flags is True, individual cell configuration
+        (recalculate_bcch, tch_indices, new_tch_count) is strictly honored,
+        and zones without cells requiring calculation are skipped.
+        """
+        from src.models.neighbor import NeighborGraph
+        from src.engine.constraints import FrequencyRules
+
+        ng = NeighborGraph()
+        rules = FrequencyRules(
+            freq_range_start=100,
+            freq_range_end=124,
+            num_generations=2,
+            population_size=10,
+            num_runs=1
+        )
+
+        z1 = OptimizationZone("z1", "Zona 1", self.poly_inner, rules=rules, execution_order=1)
+        z2 = OptimizationZone("z2", "Zona 2", self.poly_outer, rules=rules, execution_order=2)
+        assign_cells_to_zones(self.cells, [z1, z2])
+
+        # Configure cells manually as if customized in the calculation table
+        orig_centro_bcch = self.cells["C_CENTRO"].bcch
+        orig_exterior_bcch = self.cells["C_EXTERIOR"].bcch
+        orig_exterior_tch = list(self.cells["C_EXTERIOR"].tch_list)
+
+        # C_CENTRO (in z1): don't recalc BCCH, only new TCH
+        self.cells["C_CENTRO"].recalculate_bcch = False
+        self.cells["C_CENTRO"].tch_indices_to_recalculate = []
+        self.cells["C_CENTRO"].new_tch_count = 1
+
+        # C_INTERIOR (in z1): recalc BCCH
+        self.cells["C_INTERIOR"].recalculate_bcch = True
+        self.cells["C_INTERIOR"].tch_indices_to_recalculate = []
+        self.cells["C_INTERIOR"].new_tch_count = 0
+
+        # C_EXTERIOR (in z2): unchecked in table (needs_calculation == False)
+        self.cells["C_EXTERIOR"].recalculate_bcch = False
+        self.cells["C_EXTERIOR"].tch_indices_to_recalculate = []
+        self.cells["C_EXTERIOR"].new_tch_count = 0
+
+        optimizer = ClusterOptimizer(
+            cells=self.cells,
+            zones=[z1, z2],
+            global_neighbor_graph=ng,
+            frontier_distance_km=5.0,
+            respect_cell_flags=True
+        )
+
+        results = optimizer.run()
+        self.assertIn("z1", results)
+        self.assertEqual(z1.status, "Completada")
+        self.assertEqual(z2.status, "Omitida (Sin celdas a recalcular)")
+
+        # Verify C_CENTRO BCCH was preserved because recalculate_bcch was False
+        self.assertEqual(optimizer.cells["C_CENTRO"].bcch, orig_centro_bcch)
+        # Verify C_CENTRO got an extra TCH added
+        self.assertEqual(len(optimizer.cells["C_CENTRO"].tch_list), len(self.cells["C_CENTRO"].tch_list) + 1)
+        # Verify C_EXTERIOR was completely untouched
+        self.assertEqual(optimizer.cells["C_EXTERIOR"].bcch, orig_exterior_bcch)
+        self.assertEqual(optimizer.cells["C_EXTERIOR"].tch_list, orig_exterior_tch)
+
 
 if __name__ == "__main__":
     unittest.main()

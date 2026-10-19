@@ -284,8 +284,11 @@ class ClusterProgressDialog(QDialog):
 
     def log_zone_completed(self, zone_name: str, score: float, cell_count: int):
         """Append log message when a zone finishes."""
-        sc_str = format_number(score)
-        self.txt_log.append(f"✅ [{zone_name}] completada: {cell_count} celdas optimizadas | Score: {sc_str}")
+        if cell_count > 0:
+            sc_str = format_number(score)
+            self.txt_log.append(f"✅ [{zone_name}] completada: {cell_count} celdas optimizadas | Score: {sc_str}")
+        else:
+            self.txt_log.append(f"⏭️ [{zone_name}] omitida (sin celdas a recalcular)")
         self._completed_zones_count += 1
         pct = min(100, int((self._completed_zones_count / max(1, self.total_zones)) * 100))
         self.bar_overall.setValue(pct)

@@ -42,7 +42,7 @@ class FastPlanEvaluator:
         self.n_cells = len(self.cell_ids)
 
         # Max TCH per cell
-        self.max_tch = max((len(c.tch_list) for c in cells.values()), default=0)
+        self.max_tch = max((len(c.tch_list) + getattr(c, "new_tch_count", 0) for c in cells.values()), default=0)
 
         # Base fixed frequencies matrix (N, 1 + max_tch) where col 0 is BCCH, cols 1.. are TCH
         self.base_freq_matrix = np.zeros((self.n_cells, 1 + self.max_tch), dtype=np.int32)
@@ -58,6 +58,8 @@ class FastPlanEvaluator:
                 if f > 0:
                     self.base_freq_matrix[idx, 1 + s] = f
                     self.slot_mask[idx, 1 + s] = True
+            for k in range(getattr(cell, "new_tch_count", 0)):
+                self.slot_mask[idx, 1 + len(cell.tch_list) + k] = True
 
         # Precompute close pairs if enabled
         if rules.enable_distance_penalty:
