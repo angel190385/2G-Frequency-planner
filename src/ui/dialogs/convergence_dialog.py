@@ -370,6 +370,23 @@ class ConvergenceDialog(QDialog):
                 border-radius: 4px;
                 background-color: #0c1017;
             """)
+            if getattr(self, "_current_best_color", None) != c:
+                self._current_best_color = c
+                self.progress_bar.setStyleSheet(f"""
+                    QProgressBar {{
+                        border: 1px solid #334155;
+                        border-radius: 4px;
+                        text-align: center;
+                        background: #0f172a;
+                        color: #ffffff;
+                        font-weight: bold;
+                        height: 18px;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: {c};
+                        border-radius: 3px;
+                    }}
+                """)
 
         # 4. Progress bar fills smoothly as a whole across all runs
         total_work = self.total_runs * self.total_gens

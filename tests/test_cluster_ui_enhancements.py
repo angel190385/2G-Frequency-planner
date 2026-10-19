@@ -61,8 +61,10 @@ class TestClusterUIEnhancements(unittest.TestCase):
         dlg.update_progress(p2)
         self.assertEqual(dlg._zone_histories[1][0], [1, 2])
         self.assertEqual(dlg._zone_histories[1][1], [150.0, 120.0])
+        self.assertEqual(dlg.bar_current.value(), 10)
+        self.assertIn("2 / 20 Generaciones", dlg.bar_current.text())
 
-        # Run 2 of Zone 1
+        # Run 2 of Zone 1: cumulative generation = 10 + 1 = 11 of 20 (55%)
         p3 = ZoneOptimizationProgress(
             zone_index=1,
             total_zones=2,
@@ -76,6 +78,27 @@ class TestClusterUIEnhancements(unittest.TestCase):
         dlg.update_progress(p3)
         self.assertIn(2, dlg._lines)
         self.assertEqual(dlg._zone_histories[2][0], [1])
+        self.assertEqual(dlg.bar_current.value(), 55)
+        self.assertIn("11 / 20 Generaciones", dlg.bar_current.text())
+        # Run 1 is still better (120 < 140) -> color remains RUN_COLORS[0] (#00d4aa)
+        self.assertIn("#00d4aa", dlg.bar_current.styleSheet())
+
+        # When Run 2 improves to 100.0 on Gen 2 -> Run 2 becomes best, bar turns into RUN_COLORS[1] (#38bdf8)
+        p3_better = ZoneOptimizationProgress(
+            zone_index=1,
+            total_zones=2,
+            zone_name="Zona 1",
+            current_run=2,
+            total_runs=2,
+            current_gen=2,
+            total_gens=10,
+            best_score=100.0
+        )
+        dlg.update_progress(p3_better)
+        self.assertEqual(dlg.bar_current.value(), 60)
+        self.assertIn("12 / 20 Generaciones", dlg.bar_current.text())
+        self.assertIn("#38bdf8", dlg.bar_current.styleSheet())
+        self.assertIn("(Run 2)", dlg.lbl_best_score.text())
 
         # Switch to Zone 2: check that previous lines and history are cleared for the new zone
         p4 = ZoneOptimizationProgress(
@@ -94,7 +117,7 @@ class TestClusterUIEnhancements(unittest.TestCase):
         self.assertEqual(dlg._zone_histories[1][0], [1])
         self.assertEqual(dlg._zone_histories[1][1], [90.0])
 
-        # Test exact scenario from user request: Zone 1 of 2, Run 3 of 3, Gen 44 of 500
+        # Test cumulative scenario across runs: Zone 1 of 2, Run 3 of 3, Gen 44 of 500
         p_user = ZoneOptimizationProgress(
             zone_index=1,
             total_zones=2,
@@ -108,9 +131,9 @@ class TestClusterUIEnhancements(unittest.TestCase):
             total_global_runs=6
         )
         dlg.update_progress(p_user)
-        # bar_current should strictly show generation 44 of 500 (8.8% -> 8% or 9%)
-        self.assertIn("44 / 500 Generaciones", dlg.bar_current.text())
-        self.assertEqual(dlg.bar_current.value(), int(44 / 500 * 100))
+        # Total gens = 3 * 500 = 1500. Cumulative = (3 - 1)*500 + 44 = 1044 of 1500 (69%)
+        self.assertIn("1044 / 1500 Generaciones", dlg.bar_current.text())
+        self.assertEqual(dlg.bar_current.value(), int(1044 / 1500 * 100))
 
         # bar_overall should strictly show percentage and count of analyzed zones (ratio)
         self.assertEqual(dlg.bar_overall.value(), 0)
