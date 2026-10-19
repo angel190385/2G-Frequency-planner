@@ -535,6 +535,8 @@ class MainWindow(QMainWindow):
         self.calc_table.blockSignals(False)
         self._on_calc_selection_changed()
 
+    _update_calc_table = _refresh_calc_table
+
     def _on_calc_selection_changed(self):
         """Update stats when cell selection changes."""
         selected = 0
@@ -702,7 +704,7 @@ class MainWindow(QMainWindow):
                 self.cells = cells
                 self.stations = stations
                 self.cell_table.load_cells(cells)
-                self._update_calc_table()
+                self._refresh_calc_table()
                 self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
                 fname = os.path.basename(file_path)
                 self.status_label.setText(
@@ -747,7 +749,7 @@ class MainWindow(QMainWindow):
             self.cells = dlg.imported_cells
             self.stations = dlg.imported_stations
             self.cell_table.load_cells(self.cells)
-            self._update_calc_table()
+            self._refresh_calc_table()
             self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
             self.status_label.setText(
                 f"Red t_Planner importada: {len(self.cells)} celdas en {len(self.stations)} estaciones"
@@ -760,7 +762,7 @@ class MainWindow(QMainWindow):
         """Handle completion of sequential cluster/zone optimization."""
         self.cells = updated_cells
         self.cell_table.load_cells(self.cells)
-        self._update_calc_table()
+        self._refresh_calc_table()
 
         # Evaluate the consolidated global plan
         from src.engine.cost_function import evaluate_plan
@@ -801,7 +803,7 @@ class MainWindow(QMainWindow):
 
     def _on_zone_selection_applied(self):
         """Called when polygon zones selection is applied to the Calculation table."""
-        self._update_calc_table()
+        self._refresh_calc_table()
         # Switch to calculation tab (tab index 2)
         self.tabs.setCurrentIndex(2)
         self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo")
