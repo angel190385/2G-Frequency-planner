@@ -80,7 +80,8 @@ class ClusterProgressDialog(QDialog):
         self.bar_overall = QProgressBar()
         self.bar_overall.setRange(0, 100)
         self.bar_overall.setValue(0)
-        self.bar_overall.setFormat(f"0% (0 de {self.total_zones} {zona_lbl} realizadas)")
+        zona_str = "Zona analizada" if self.total_zones == 1 else "Zonas analizadas"
+        self.bar_overall.setFormat(f"0% (0 de {self.total_zones} {zona_str})")
         self.bar_overall.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #334155;
@@ -212,12 +213,7 @@ class ClusterProgressDialog(QDialog):
         self.bar_current.setFormat(f"{gen_pct}% ({p.current_gen} / {p.total_gens} Generaciones)")
 
         # 2. Barra de progreso global:
-        # Muestra el avance y las zonas realizadas sobre el total de zonas
-        zone_fraction = (p.current_run - 1 + (p.current_gen / max(1, p.total_gens))) / max(1, p.total_runs)
-        zones_progress = (p.zone_index - 1) + zone_fraction
-        overall_pct = min(100, max(0, int((zones_progress / max(1, p.total_zones)) * 100)))
-        self.bar_overall.setValue(overall_pct)
-
+        # El porcentaje muestra estrictamente el ratio de zonas analizadas sobre el total de zonas.
         zona_lbl = "Zona" if p.total_zones == 1 else "Zonas"
         if hasattr(self, "grp_overall"):
             self.grp_overall.setTitle(f"Progreso Global ({p.total_zones} {zona_lbl})")
@@ -225,9 +221,11 @@ class ClusterProgressDialog(QDialog):
         if hasattr(self, "grp_current"):
             self.grp_current.setTitle(f"Zona Activa: {p.zone_name}")
 
-        zona_str = "Zona realizada" if p.total_zones == 1 else "Zonas realizadas"
+        zona_str = "Zona analizada" if p.total_zones == 1 else "Zonas analizadas"
+        zones_pct = min(100, max(0, int((self._completed_zones_count / max(1, p.total_zones)) * 100)))
+        self.bar_overall.setValue(zones_pct)
         self.bar_overall.setFormat(
-            f"{overall_pct}% ({self._completed_zones_count} de {p.total_zones} {zona_str})"
+            f"{zones_pct}% ({self._completed_zones_count} de {p.total_zones} {zona_str})"
         )
 
         # ── Live Miniature Convergence Plot ──
@@ -286,7 +284,7 @@ class ClusterProgressDialog(QDialog):
         self._completed_zones_count += 1
         pct = min(100, int((self._completed_zones_count / max(1, self.total_zones)) * 100))
         self.bar_overall.setValue(pct)
-        zona_str = "Zona realizada" if self.total_zones == 1 else "Zonas realizadas"
+        zona_str = "Zona analizada" if self.total_zones == 1 else "Zonas analizadas"
         if self._completed_zones_count >= self.total_zones:
             self.bar_overall.setFormat(f"100% ({self.total_zones} de {self.total_zones} {zona_str})")
             self.bar_current.setValue(100)

@@ -112,11 +112,19 @@ class TestClusterUIEnhancements(unittest.TestCase):
         self.assertIn("44 / 500 Generaciones", dlg.bar_current.text())
         self.assertEqual(dlg.bar_current.value(), int(44 / 500 * 100))
 
-        # bar_overall should show zones realizadas
-        self.assertIn("0 de 2 Zonas realizadas", dlg.bar_overall.text())
-        # Once zone completes, it reflects in completed zones count
+        # bar_overall should strictly show percentage and count of analyzed zones (ratio)
+        self.assertEqual(dlg.bar_overall.value(), 0)
+        self.assertIn("0% (0 de 2 Zonas analizadas)", dlg.bar_overall.text())
+
+        # When Zone 1 completes, ratio becomes 1 / 2 = 50%
         dlg.log_zone_completed("Zona 1", 100.0, 10)
-        self.assertIn("1 de 2 Zonas realizadas", dlg.bar_overall.text())
+        self.assertEqual(dlg.bar_overall.value(), 50)
+        self.assertIn("50% (1 de 2 Zonas analizadas)", dlg.bar_overall.text())
+
+        # When Zone 2 completes, ratio becomes 2 / 2 = 100%
+        dlg.log_zone_completed("Zona 2", 90.0, 10)
+        self.assertEqual(dlg.bar_overall.value(), 100)
+        self.assertIn("100% (2 de 2 Zonas analizadas)", dlg.bar_overall.text())
         dlg.close()
 
     def test_map_widget_optimization_parameters(self):
