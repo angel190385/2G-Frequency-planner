@@ -815,14 +815,27 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            from src.ui.dialogs.wait_dialog import BusyWaitDialog
+
             if import_type == "cells":
-                cells, stations, warnings = load_cells(file_path)
-                self.cells = cells
-                self.stations = stations
-                self.cell_table.load_cells(cells)
-                self._refresh_calc_table()
-                self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-                self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                with BusyWaitDialog("Importando Celdas", "Leyendo archivo de celdas...", self) as wait:
+                    def on_cells_progress(read_count, accepted_count):
+                        wait.set_text(f"Leyendo archivo ({read_count} filas procesadas, {accepted_count} celdas)...")
+
+                    cells, stations, warnings = load_cells(file_path, progress_callback=on_cells_progress)
+                    self.cells = cells
+                    self.stations = stations
+
+                    wait.set_text("Actualizando tabla de datos de entrada...")
+                    self.cell_table.load_cells(cells)
+
+                    wait.set_text("Actualizando tabla de cálculo...")
+                    self._refresh_calc_table()
+
+                    wait.set_text("Actualizando mapa y visualización...")
+                    self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                    self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+
                 fname = os.path.basename(file_path)
                 self.status_label.setText(
                     f"Celdas importadas ({fname}): {len(cells)} celdas de {len(stations)} estaciones"
@@ -831,19 +844,36 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentWidget(self.zone_map_widget)
 
             elif import_type == "neighbors":
-                graph, warnings = load_neighbors(file_path, self.cells)
-                self.neighbor_graph = graph
-                self.neighbor_table.load_data(graph, self.cells)
-                self.ho_table.load_data(graph, self.cells)
-                self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-                self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                with BusyWaitDialog("Importando Vecindades", "Calculando distancias y grafo de vecindades...", self) as wait:
+                    def on_ng_progress(read_count, rel_count):
+                        wait.set_text(f"Calculando vecindades ({read_count} filas, {rel_count} relaciones)...")
+
+                    graph, warnings = load_neighbors(file_path, self.cells, progress_callback=on_ng_progress)
+                    self.neighbor_graph = graph
+
+                    wait.set_text("Actualizando tabla de vecindades...")
+                    self.neighbor_table.load_data(graph, self.cells)
+                    self.ho_table.load_data(graph, self.cells)
+
+                    wait.set_text("Actualizando mapa con relaciones...")
+                    self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                    self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+
                 self.status_label.setText(
-                    f"Vecindades importadas: {graph.total_relations} relaciones")
+                    f"Vecindades importadas: {graph.total_relations} relaciones"
+                )
 
             elif import_type == "handovers":
-                warnings = load_handovers(file_path, self.neighbor_graph)
-                self.neighbor_table.load_data(self.neighbor_graph, self.cells)
-                self.ho_table.load_data(self.neighbor_graph, self.cells)
+                with BusyWaitDialog("Importando Handovers", "Asociando estadísticas de traspaso a vecindades...", self) as wait:
+                    def on_ho_progress(read_count, matched_count):
+                        wait.set_text(f"Asociando handovers ({read_count} filas, {matched_count} coincidencias)...")
+
+                    warnings = load_handovers(file_path, self.neighbor_graph, progress_callback=on_ho_progress)
+
+                    wait.set_text("Actualizando tablas de vecindades y HO...")
+                    self.neighbor_table.load_data(self.neighbor_graph, self.cells)
+                    self.ho_table.load_data(self.neighbor_graph, self.cells)
+
                 self.status_label.setText("Handovers importados")
 
             if warnings:
@@ -864,12 +894,19 @@ class MainWindow(QMainWindow):
         """Open dialog to import global network exports from t_Planner."""
         dlg = PlannerImportDialog(self)
         if dlg.exec() == PlannerImportDialog.DialogCode.Accepted:
-            self.cells = dlg.imported_cells
-            self.stations = dlg.imported_stations
-            self.cell_table.load_cells(self.cells)
-            self._refresh_calc_table()
-            self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-            self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+            from src.ui.dialogs.wait_dialog import BusyWaitDialog
+            with BusyWaitDialog("Cargando en Interfaz", "Poblando tabla de celdas...", self) as wait:
+                self.cells = dlg.imported_cells
+                self.stations = dlg.imported_stations
+                self.cell_table.load_cells(self.cells)
+
+                wait.set_text("Actualizando tabla de frecuencias y cálculo...")
+                self._refresh_calc_table()
+
+                wait.set_text("Actualizando mapa y visualización...")
+                self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+
             self.status_label.setText(
                 f"Red t_Planner importada: {len(self.cells)} celdas en {len(self.stations)} estaciones"
             )

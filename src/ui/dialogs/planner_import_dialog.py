@@ -129,10 +129,16 @@ class PlannerImportDialog(QDialog):
             return
 
         try:
-            cells, stations, stats = load_planner_global_cells(
-                self.cells_file,
-                self.sectors_file if self.sectors_file else None
-            )
+            from src.ui.dialogs.wait_dialog import BusyWaitDialog
+            with BusyWaitDialog("Importando t_Planner", "Leyendo archivos y azimuts de sectores...", self) as wait:
+                def on_progress(total, accepted):
+                    wait.set_text(f"Procesando celdas ({total} filas analizadas, {accepted} aceptadas)...")
+
+                cells, stations, stats = load_planner_global_cells(
+                    self.cells_file,
+                    self.sectors_file if self.sectors_file else None,
+                    progress_callback=on_progress
+                )
 
             self.imported_cells = cells
             self.imported_stations = stations

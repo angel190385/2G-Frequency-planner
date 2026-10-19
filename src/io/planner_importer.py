@@ -148,9 +148,13 @@ def load_planner_sectors(sectors_file_path: str) -> dict[str, float]:
     return azimuth_map
 
 
+from typing import Optional, Any, Callable
+
+
 def load_planner_global_cells(
     cells_file_path: str,
-    sectors_file_path: Optional[str] = None
+    sectors_file_path: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None
 ) -> tuple[dict[str, Cell], dict[str, Station], dict[str, Any]]:
     """
     Import network cells from t_Planner_Global_Cells.csv.
@@ -253,6 +257,8 @@ def load_planner_global_cells(
             if not row or not any(row):
                 continue
             stats["total_rows"] += 1
+            if progress_callback and stats["total_rows"] % 2000 == 0:
+                progress_callback(stats["total_rows"], stats["accepted"])
 
             # 1. Filter: MNC == 1 (or '01')
             mnc = get_val(row, 'mnc')

@@ -5,7 +5,7 @@ Supports CSV (comma and semicolon separated) and Excel files.
 from __future__ import annotations
 import csv
 import os
-from typing import Optional
+from typing import Optional, Callable
 
 from src.models.cell import Cell, Station
 from src.models.neighbor import NeighborRelation, NeighborGraph, haversine_distance
@@ -93,12 +93,15 @@ def _parse_float(value: str) -> float:
         return 0.0
 
 
-def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], list[str]]:
+def load_cells(
+    file_path: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> tuple[dict[str, Cell], dict[str, Station], list[str]]:
     """
     Load cells from a CSV/Excel file.
 
     Expected columns:
-        station_id, station_name, lat, lon, cell_id, sector, bcch,
+        station_id, station_name, lat, lon, CellName, sector, bcch,
         tch1, tch2, tch3, ...
 
     Returns:
@@ -126,6 +129,8 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
     tch_columns.sort()
 
     for i, row in enumerate(rows, start=2):  # row 2+ (1 is header)
+        if progress_callback and i % 1000 == 0:
+            progress_callback(i, len(cells))
         try:
             station_id = row.get('station_id', '').strip()
             station_name = row.get('station_name', station_id).strip()
@@ -220,7 +225,8 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
 
 def load_neighbors(
     file_path: str,
-    cells: dict[str, Cell]
+    cells: dict[str, Cell],
+    progress_callback: Optional[Callable[[int, int], None]] = None
 ) -> tuple[NeighborGraph, list[str]]:
     """
     Load neighbor relations from a CSV/Excel file.
@@ -239,6 +245,8 @@ def load_neighbors(
     warnings: list[str] = []
 
     for i, row in enumerate(rows, start=2):
+        if progress_callback and i % 1000 == 0:
+            progress_callback(i, graph.total_relations)
         try:
             cell_a = row.get('cell_a', '').strip()
             cell_b = row.get('cell_b', '').strip()
@@ -277,7 +285,8 @@ def load_neighbors(
 
 def load_handovers(
     file_path: str,
-    neighbor_graph: NeighborGraph
+    neighbor_graph: NeighborGraph,
+    progress_callback: Optional[Callable[[int, int], None]] = None
 ) -> list[str]:
     """
     Load handover data and merge it into the existing neighbor graph.
@@ -296,6 +305,8 @@ def load_handovers(
     unmatched = 0
 
     for i, row in enumerate(rows, start=2):
+        if progress_callback and i % 1000 == 0:
+            progress_callback(i, matched)
         try:
             cell_a = row.get('cell_a', '').strip()
             cell_b = row.get('cell_b', '').strip()
