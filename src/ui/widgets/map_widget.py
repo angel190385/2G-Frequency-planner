@@ -9,10 +9,12 @@ import math
 import copy
 from typing import Optional
 
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QGroupBox, QSplitter, QCheckBox, QTableWidget,
-    QTableWidgetItem, QHeaderView, QDoubleSpinBox, QMessageBox, QFrame
+    QTableWidgetItem, QHeaderView, QDoubleSpinBox, QSpinBox,
+    QGridLayout, QMessageBox, QFrame
 )
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -266,18 +268,41 @@ class MapWidget(QWidget):
         """)
         layout.addWidget(self.table_zones, 1)
 
-        # Frontier configuration
-        frontier_box = QGroupBox("Protección de Fronteras")
-        fl = QHBoxLayout(frontier_box)
-        fl.addWidget(QLabel("Distancia frontera:"))
+        # Optimization Configuration (Frontier, Runs, CPUs)
+        cfg_box = QGroupBox("⚙️ Parámetros de Optimización")
+        cfg_layout = QGridLayout(cfg_box)
+        cfg_layout.setContentsMargins(8, 8, 8, 8)
+        cfg_layout.setSpacing(6)
+
+        # 1. Frontier protection distance
+        cfg_layout.addWidget(QLabel("Distancia frontera:"), 0, 0)
         self.spin_frontier = QDoubleSpinBox()
         self.spin_frontier.setRange(1.0, 30.0)
         self.spin_frontier.setValue(8.0)
         self.spin_frontier.setSuffix(" km")
-        self.spin_frontier.setToolTip("Radio de seguridad alrededor de la zona donde las celdas exteriores actúan como restricciones fijas")
-        fl.addWidget(self.spin_frontier)
-        fl.addStretch()
-        layout.addWidget(frontier_box)
+        self.spin_frontier.setToolTip("Radio de protección alrededor de la zona donde las celdas exteriores actúan como restricciones fijas")
+        cfg_layout.addWidget(self.spin_frontier, 0, 1)
+
+        # 2. Number of runs per zone
+        cfg_layout.addWidget(QLabel("Pasadas / Runs:"), 1, 0)
+        self.spin_runs = QSpinBox()
+        self.spin_runs.setRange(1, 20)
+        self.spin_runs.setValue(3)
+        self.spin_runs.setToolTip("Número de ejecuciones independientes del algoritmo genético por cada zona")
+        self.spin_runs.valueChanged.connect(self._on_runs_changed)
+        cfg_layout.addWidget(self.spin_runs, 1, 1)
+
+        # 3. CPU Cores / Parallel Workers
+        cfg_layout.addWidget(QLabel("CPUs / Núcleos:"), 2, 0)
+        self.spin_workers = QSpinBox()
+        hw_cores = os.cpu_count() or 4
+        self.spin_workers.setRange(1, max(32, hw_cores))
+        self.spin_workers.setValue(hw_cores)
+        self.spin_workers.setSuffix(f" / {hw_cores}")
+        self.spin_workers.setToolTip("Número de procesos CPU concurrentes a utilizar en la optimización")
+        cfg_layout.addWidget(self.spin_workers, 2, 1)
+
+        layout.addWidget(cfg_box)
 
         # Apply selection to Calculation tab button
         self.btn_apply_to_calc = QPushButton("☑️ Aplicar Selección a Tabla de Cálculo")
@@ -759,6 +784,8 @@ class MapWidget(QWidget):
         color = ZONE_COLORS[(zone_idx - 1) % len(ZONE_COLORS)]
 
         zone_rules = copy.deepcopy(self.rules) if self.rules is not None else FrequencyRules()
+        if hasattr(self, "spin_runs"):
+            zone_rules.num_runs = self.spin_runs.value()
 
         new_zone = OptimizationZone(
             zone_id=zone_id,
@@ -976,6 +1003,12 @@ class MapWidget(QWidget):
             "La tabla de la pestaña 'Cálculo' se ha actualizado con este subconjunto."
         )
 
+    def _on_runs_changed(self, val: int):
+        """Update default runs count across existing zones."""
+        for z in self.zones:
+            if hasattr(z, "rules") and z.rules:
+                z.rules.num_runs = val
+
     def _run_cluster_optimization(self):
         """Launch the sequential cluster optimization."""
         if not self.zones:
@@ -994,13 +1027,21 @@ class MapWidget(QWidget):
         self.cluster_dialog.show()
 
         frontier_dist = self.spin_frontier.value()
+        workers = self.spin_workers.value() if hasattr(self, "spin_workers") else None
+        runs = self.spin_runs.value() if hasattr(self, "spin_runs") else 3
+
+        # Ensure all zones have runs defined
+        for z in self.zones:
+            if hasattr(z, "rules") and z.rules:
+                if not hasattr(z.rules, "num_runs") or z.rules.num_runs <= 0:
+                    z.rules.num_runs = runs
 
         self.cluster_thread = ClusterOptimizerThread(
             cells=self.cells,
             zones=self.zones,
             global_neighbor_graph=self.neighbor_graph,
             frontier_distance_km=frontier_dist,
-            max_workers=None
+            max_workers=workers
         )
 
         self.cluster_thread.progress.connect(self.cluster_dialog.update_progress)

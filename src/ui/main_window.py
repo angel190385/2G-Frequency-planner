@@ -81,6 +81,18 @@ class OptimizerThread(QThread):
 class MainWindow(QMainWindow):
     """Main application window."""
 
+    # Calc table column indices
+    COL_RECALC = 0
+    COL_ZONE = 1
+    COL_CELL_ID = 2
+    COL_STATION = 3
+    COL_SECTOR = 4
+    COL_BCCH = 5
+    COL_RECALC_BCCH = 6
+    COL_TCH = 7
+    COL_RECALC_TCH = 8
+    COL_NEW_TCH = 9
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("📡 Freq Planner 2G — Planificación de Frecuencias GSM")
@@ -217,8 +229,9 @@ class MainWindow(QMainWindow):
         # Backward compatibility alias
         self.map_widget = self.zone_map_widget
 
-        # Synchronize zone outlines to results map
+        # Synchronize zone outlines to results map and calculation table
         self.zone_map_widget.zones_changed.connect(self.result_map_widget.set_zones)
+        self.zone_map_widget.zones_changed.connect(lambda _: self._refresh_calc_table())
 
         main_layout.addWidget(self.tabs)
 
@@ -275,9 +288,9 @@ class MainWindow(QMainWindow):
         self.calc_table.verticalHeader().setVisible(False)
         self.calc_table.horizontalHeader().setStretchLastSection(True)
 
-        columns = ["Recalc", "Cell ID", "Estación", "Sector",
-                    "BCCH", "Recalc BCCH", "TCH actuales",
-                    "TCH a recalcular", "Nuevos TCH"]
+        columns = ["Recalc", "Zona", "Cell ID", "Estación", "Sector",
+                   "BCCH", "Recalc BCCH", "TCH actuales",
+                   "TCH a recalcular", "Nuevos TCH"]
         self.calc_table.setColumnCount(len(columns))
         self.calc_table.setHorizontalHeaderLabels(columns)
         self.calc_table.itemChanged.connect(self._on_calc_table_item_changed)
@@ -473,48 +486,70 @@ class MainWindow(QMainWindow):
     def _on_calc_table_item_changed(self, item):
         if self.calc_table.signalsBlocked():
             return
-        if item.column() in (0, 5, 7, 8):
+        if item.column() in (self.COL_RECALC, self.COL_RECALC_BCCH, self.COL_RECALC_TCH, self.COL_NEW_TCH):
             self._on_calc_selection_changed()
 
     def _refresh_calc_table(self):
-        """Refresh the calculation cell selection table using native lightweight items."""
+        """Refresh the calculation cell selection table with cell info and assigned zones."""
         self.calc_table.blockSignals(True)
         self.calc_table.setRowCount(len(self.cells))
         self.calc_table.verticalHeader().setDefaultSectionSize(26)
 
+        # Build lookup for quick zone mapping
+        cell_to_zone = {}
+        if hasattr(self, "zone_map_widget") and self.zone_map_widget and self.zone_map_widget.zones:
+            for z in self.zone_map_widget.zones:
+                for cid in z.cell_ids:
+                    cell_to_zone[cid] = z
+
         for row, cell in enumerate(sorted(self.cells.values(),
                                            key=lambda c: (c.station.station_id, c.sector))):
-            # Recalc checkbox (native QTableWidgetItem checkstate)
+            # 0. Recalc checkbox (native QTableWidgetItem checkstate)
             item_recalc = QTableWidgetItem()
             item_recalc.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             item_recalc.setCheckState(Qt.CheckState.Checked if cell.needs_calculation else Qt.CheckState.Unchecked)
-            self.calc_table.setItem(row, 0, item_recalc)
+            self.calc_table.setItem(row, self.COL_RECALC, item_recalc)
 
-            # Cell info
+            # 1. Zona column (badge with zone color or unassigned mark)
+            z = cell_to_zone.get(cell.cell_id)
+            if z:
+                item_zone = QTableWidgetItem(f"● {z.name}")
+                item_zone.setToolTip(f"Perteneciente al clúster / zona: {z.name}")
+                c_hex = getattr(z, "color", "#00d4aa")
+                item_zone.setForeground(QBrush(QColor(c_hex)))
+            else:
+                item_zone = QTableWidgetItem("—")
+                item_zone.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item_zone.setForeground(QBrush(QColor("#64748b")))
+                item_zone.setToolTip("Celda fuera de polígonos / zonas")
+            item_zone.setFlags(item_zone.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.calc_table.setItem(row, self.COL_ZONE, item_zone)
+
+            # 2..5 Cell info: Cell ID, Estación, Sector, BCCH
             items = [
                 cell.cell_id,
                 cell.station.station_id,
                 cell.sector,
                 str(cell.bcch) if cell.bcch is not None else "—",
             ]
-            for col, text in enumerate(items):
+            for col_offset, text in enumerate(items):
                 item = QTableWidgetItem(text)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.calc_table.setItem(row, col + 1, item)
+                self.calc_table.setItem(row, self.COL_CELL_ID + col_offset, item)
 
-            # Recalc BCCH checkbox (native QTableWidgetItem checkstate)
+            # 6. Recalc BCCH checkbox
             item_bcch = QTableWidgetItem()
             item_bcch.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             item_bcch.setCheckState(Qt.CheckState.Checked if cell.recalculate_bcch else Qt.CheckState.Unchecked)
-            self.calc_table.setItem(row, 5, item_bcch)
+            self.calc_table.setItem(row, self.COL_RECALC_BCCH, item_bcch)
 
-            # TCH info
+            # 7. TCH info
             tch_str = ",".join(str(f) for f in cell.tch_list) if cell.tch_list else "—"
             tch_item = QTableWidgetItem(tch_str)
             tch_item.setFlags(tch_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.calc_table.setItem(row, 6, tch_item)
+            self.calc_table.setItem(row, self.COL_TCH, tch_item)
 
-            # TCH indices to recalculate (editable text)
+            # 8. TCH indices to recalculate (editable text)
             tch_recalc_str = ",".join(str(i+1) for i in cell.tch_indices_to_recalculate)
             tch_recalc_item = QTableWidgetItem(tch_recalc_str)
             tch_recalc_item.setToolTip(
@@ -522,25 +557,26 @@ class MainWindow(QMainWindow):
                 "Ej: '1,3' recalcula TCH1 y TCH3.\n"
                 "Dejar vacío para no recalcular TCH existentes."
             )
-            self.calc_table.setItem(row, 7, tch_recalc_item)
+            self.calc_table.setItem(row, self.COL_RECALC_TCH, tch_recalc_item)
 
-            # New TCH count (editable integer item)
+            # 9. New TCH count (editable integer item)
             item_new = QTableWidgetItem(str(cell.new_tch_count))
             item_new.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
             item_new.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.calc_table.setItem(row, 8, item_new)
+            self.calc_table.setItem(row, self.COL_NEW_TCH, item_new)
 
         header = self.calc_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.calc_table.setColumnWidth(0, 60)
-        self.calc_table.setColumnWidth(1, 100)
-        self.calc_table.setColumnWidth(2, 90)
-        self.calc_table.setColumnWidth(3, 60)
-        self.calc_table.setColumnWidth(4, 70)
-        self.calc_table.setColumnWidth(5, 90)
-        self.calc_table.setColumnWidth(6, 110)
-        self.calc_table.setColumnWidth(7, 120)
-        self.calc_table.setColumnWidth(8, 80)
+        self.calc_table.setColumnWidth(self.COL_RECALC, 60)
+        self.calc_table.setColumnWidth(self.COL_ZONE, 95)
+        self.calc_table.setColumnWidth(self.COL_CELL_ID, 100)
+        self.calc_table.setColumnWidth(self.COL_STATION, 90)
+        self.calc_table.setColumnWidth(self.COL_SECTOR, 60)
+        self.calc_table.setColumnWidth(self.COL_BCCH, 70)
+        self.calc_table.setColumnWidth(self.COL_RECALC_BCCH, 90)
+        self.calc_table.setColumnWidth(self.COL_TCH, 110)
+        self.calc_table.setColumnWidth(self.COL_RECALC_TCH, 120)
+        self.calc_table.setColumnWidth(self.COL_NEW_TCH, 80)
 
         self.calc_table.blockSignals(False)
         self._on_calc_selection_changed()
@@ -553,24 +589,24 @@ class MainWindow(QMainWindow):
         total_vars = 0
 
         for row in range(self.calc_table.rowCount()):
-            recalc_item = self.calc_table.item(row, 0)
+            recalc_item = self.calc_table.item(row, self.COL_RECALC)
             if recalc_item and recalc_item.checkState() == Qt.CheckState.Checked:
                 selected += 1
 
                 # Count BCCH
-                bcch_item = self.calc_table.item(row, 5)
+                bcch_item = self.calc_table.item(row, self.COL_RECALC_BCCH)
                 if bcch_item and bcch_item.checkState() == Qt.CheckState.Checked:
                     total_vars += 1
 
                 # Count TCH recalcs
-                tch_item = self.calc_table.item(row, 7)
+                tch_item = self.calc_table.item(row, self.COL_RECALC_TCH)
                 if tch_item and tch_item.text().strip():
                     indices = [p.strip() for p in tch_item.text().split(',')
                                if p.strip()]
                     total_vars += len(indices)
 
                 # Count new TCH
-                new_item = self.calc_table.item(row, 8)
+                new_item = self.calc_table.item(row, self.COL_NEW_TCH)
                 if new_item and new_item.text().strip():
                     try:
                         total_vars += max(0, min(20, int(new_item.text().strip())))
@@ -583,7 +619,7 @@ class MainWindow(QMainWindow):
     def _select_all_cells(self):
         self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
-            item = self.calc_table.item(row, 0)
+            item = self.calc_table.item(row, self.COL_RECALC)
             if item:
                 item.setCheckState(Qt.CheckState.Checked)
         self.calc_table.blockSignals(False)
@@ -594,17 +630,17 @@ class MainWindow(QMainWindow):
         self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
             # 1. Uncheck Recalc
-            item = self.calc_table.item(row, 0)
+            item = self.calc_table.item(row, self.COL_RECALC)
             if item:
                 item.setCheckState(Qt.CheckState.Unchecked)
 
             # 2. Uncheck Recalc BCCH
-            item_bcch = self.calc_table.item(row, 5)
+            item_bcch = self.calc_table.item(row, self.COL_RECALC_BCCH)
             if item_bcch:
                 item_bcch.setCheckState(Qt.CheckState.Unchecked)
 
             # 3. Clear TCH a recalcular
-            item_tch = self.calc_table.item(row, 7)
+            item_tch = self.calc_table.item(row, self.COL_RECALC_TCH)
             if item_tch:
                 item_tch.setText("")
 
@@ -616,31 +652,31 @@ class MainWindow(QMainWindow):
         """Mark 'Recalc' for all cells and set all existing TCHs to be recalculated (without BCCH)."""
         self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
-            # 1. Col 0: Recalc checked
-            item_recalc = self.calc_table.item(row, 0)
+            # 1. Recalc checked
+            item_recalc = self.calc_table.item(row, self.COL_RECALC)
             if item_recalc:
                 item_recalc.setCheckState(Qt.CheckState.Checked)
 
-            # 2. Col 5: Recalc BCCH unchecked (only TCHs)
-            item_bcch = self.calc_table.item(row, 5)
+            # 2. Recalc BCCH unchecked (only TCHs)
+            item_bcch = self.calc_table.item(row, self.COL_RECALC_BCCH)
             if item_bcch:
                 item_bcch.setCheckState(Qt.CheckState.Unchecked)
 
-            # 3. Col 7: Mark all TCHs (1-based indices)
-            cell_id_item = self.calc_table.item(row, 1)
+            # 3. Mark all TCHs (1-based indices)
+            cell_id_item = self.calc_table.item(row, self.COL_CELL_ID)
             cid = cell_id_item.text().strip() if cell_id_item else ""
             cell = self.cells.get(cid)
             if cell and cell.tch_list:
                 all_tch_str = ",".join(str(i + 1) for i in range(len(cell.tch_list)))
             else:
-                tch_item_col6 = self.calc_table.item(row, 6)
-                if tch_item_col6 and tch_item_col6.text().strip() and tch_item_col6.text().strip() != "—":
-                    count = len([x for x in tch_item_col6.text().split(",") if x.strip()])
+                tch_item_col = self.calc_table.item(row, self.COL_TCH)
+                if tch_item_col and tch_item_col.text().strip() and tch_item_col.text().strip() != "—":
+                    count = len([x for x in tch_item_col.text().split(",") if x.strip()])
                     all_tch_str = ",".join(str(i + 1) for i in range(count))
                 else:
                     all_tch_str = ""
 
-            item_tch = self.calc_table.item(row, 7)
+            item_tch = self.calc_table.item(row, self.COL_RECALC_TCH)
             if item_tch:
                 item_tch.setText(all_tch_str)
 
@@ -652,31 +688,31 @@ class MainWindow(QMainWindow):
         """Mark 'Recalc', 'Recalc BCCH', and all existing TCHs for all cells."""
         self.calc_table.blockSignals(True)
         for row in range(self.calc_table.rowCount()):
-            # 1. Col 0: Recalc checked
-            item_recalc = self.calc_table.item(row, 0)
+            # 1. Recalc checked
+            item_recalc = self.calc_table.item(row, self.COL_RECALC)
             if item_recalc:
                 item_recalc.setCheckState(Qt.CheckState.Checked)
 
-            # 2. Col 5: Recalc BCCH checked
-            item_bcch = self.calc_table.item(row, 5)
+            # 2. Recalc BCCH checked
+            item_bcch = self.calc_table.item(row, self.COL_RECALC_BCCH)
             if item_bcch:
                 item_bcch.setCheckState(Qt.CheckState.Checked)
 
-            # 3. Col 7: Mark all TCHs (1-based indices)
-            cell_id_item = self.calc_table.item(row, 1)
+            # 3. Mark all TCHs (1-based indices)
+            cell_id_item = self.calc_table.item(row, self.COL_CELL_ID)
             cid = cell_id_item.text().strip() if cell_id_item else ""
             cell = self.cells.get(cid)
             if cell and cell.tch_list:
                 all_tch_str = ",".join(str(i + 1) for i in range(len(cell.tch_list)))
             else:
-                tch_item_col6 = self.calc_table.item(row, 6)
-                if tch_item_col6 and tch_item_col6.text().strip() and tch_item_col6.text().strip() != "—":
-                    count = len([x for x in tch_item_col6.text().split(",") if x.strip()])
+                tch_item_col = self.calc_table.item(row, self.COL_TCH)
+                if tch_item_col and tch_item_col.text().strip() and tch_item_col.text().strip() != "—":
+                    count = len([x for x in tch_item_col.text().split(",") if x.strip()])
                     all_tch_str = ",".join(str(i + 1) for i in range(count))
                 else:
                     all_tch_str = ""
 
-            item_tch = self.calc_table.item(row, 7)
+            item_tch = self.calc_table.item(row, self.COL_RECALC_TCH)
             if item_tch:
                 item_tch.setText(all_tch_str)
 
@@ -839,17 +875,17 @@ class MainWindow(QMainWindow):
                               key=lambda c: (c.station.station_id, c.sector))
 
         for row, cell in enumerate(sorted_cells):
-            recalc_item = self.calc_table.item(row, 0)
+            recalc_item = self.calc_table.item(row, self.COL_RECALC)
             if not recalc_item or recalc_item.checkState() != Qt.CheckState.Checked:
                 cell.recalculate_bcch = False
                 cell.tch_indices_to_recalculate = []
                 cell.new_tch_count = 0
                 continue
 
-            bcch_item = self.calc_table.item(row, 5)
+            bcch_item = self.calc_table.item(row, self.COL_RECALC_BCCH)
             cell.recalculate_bcch = (bcch_item is not None and bcch_item.checkState() == Qt.CheckState.Checked)
 
-            tch_item = self.calc_table.item(row, 7)
+            tch_item = self.calc_table.item(row, self.COL_RECALC_TCH)
             if tch_item and tch_item.text().strip():
                 indices = []
                 for part in tch_item.text().split(','):
@@ -865,7 +901,7 @@ class MainWindow(QMainWindow):
             else:
                 cell.tch_indices_to_recalculate = []
 
-            new_item = self.calc_table.item(row, 8)
+            new_item = self.calc_table.item(row, self.COL_NEW_TCH)
             try:
                 cell.new_tch_count = max(0, min(20, int(new_item.text().strip()))) if new_item else 0
             except (ValueError, TypeError):

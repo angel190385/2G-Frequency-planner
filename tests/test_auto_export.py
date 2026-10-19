@@ -272,9 +272,10 @@ class TestAutoExport(unittest.TestCase):
         win.btn_recalc_all_tch.click()
 
         for row in range(win.calc_table.rowCount()):
-            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Checked)
-            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Unchecked)
-            self.assertEqual(win.calc_table.item(row, 7).text(), "1,2")
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, win.COL_ZONE).text(), "—")
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_BCCH).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_TCH).text(), "1,2")
 
         self.assertFalse(self.c1.recalculate_bcch)
         self.assertEqual(self.c1.tch_indices_to_recalculate, [0, 1])
@@ -291,9 +292,9 @@ class TestAutoExport(unittest.TestCase):
         win.btn_recalc_all.click()
 
         for row in range(win.calc_table.rowCount()):
-            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Checked)
-            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Checked)
-            self.assertEqual(win.calc_table.item(row, 7).text(), "1,2")
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_BCCH).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_TCH).text(), "1,2")
 
         self.assertTrue(self.c1.recalculate_bcch)
         self.assertEqual(self.c1.tch_indices_to_recalculate, [0, 1])
@@ -310,9 +311,9 @@ class TestAutoExport(unittest.TestCase):
         win.btn_deselect_all.click()
 
         for row in range(win.calc_table.rowCount()):
-            self.assertEqual(win.calc_table.item(row, 0).checkState(), Qt.CheckState.Unchecked)
-            self.assertEqual(win.calc_table.item(row, 5).checkState(), Qt.CheckState.Unchecked)
-            self.assertEqual(win.calc_table.item(row, 7).text(), "")
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_BCCH).checkState(), Qt.CheckState.Unchecked)
+            self.assertEqual(win.calc_table.item(row, win.COL_RECALC_TCH).text(), "")
 
         self.assertFalse(self.c1.recalculate_bcch)
         self.assertEqual(self.c1.tch_indices_to_recalculate, [])
