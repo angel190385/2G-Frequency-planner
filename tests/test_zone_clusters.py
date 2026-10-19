@@ -78,6 +78,64 @@ class TestZoneClusters(unittest.TestCase):
         # C_LEJOS is ~25 km away -> MUST NOT be in frontier
         self.assertNotIn("C_LEJOS", frontier)
 
+    def test_neighbor_graph_filter_by_cells(self):
+        """
+        Verify that NeighborGraph.filter_by_cells creates a subgraph
+        with only relations where both cells are in the given subset.
+        """
+        from src.models.neighbor import NeighborGraph, NeighborRelation
+        ng = NeighborGraph()
+        ng.add_relation(NeighborRelation("C_CENTRO", "C_INTERIOR", ho_count=50, distance_km=0.1))
+        ng.add_relation(NeighborRelation("C_INTERIOR", "C_EXTERIOR", ho_count=20, distance_km=1.2))
+        ng.add_relation(NeighborRelation("C_EXTERIOR", "C_LEJOS", ho_count=5, distance_km=25.0))
+
+        self.assertEqual(ng.total_relations, 3)
+
+        sub_ng = ng.filter_by_cells({"C_CENTRO", "C_INTERIOR"})
+        self.assertEqual(sub_ng.total_relations, 1)
+        self.assertTrue(sub_ng.are_neighbors("C_CENTRO", "C_INTERIOR"))
+        self.assertFalse(sub_ng.are_neighbors("C_INTERIOR", "C_EXTERIOR"))
+
+        sub_ng2 = ng.filter_by_cells({"C_CENTRO", "C_EXTERIOR"})
+        self.assertEqual(sub_ng2.total_relations, 0)
+
+    def test_cluster_optimizer_sequential_execution(self):
+        """
+        Test end-to-end execution of ClusterOptimizer with neighbor graph and multiple zones.
+        """
+        from src.models.neighbor import NeighborGraph, NeighborRelation
+        from src.engine.constraints import FrequencyRules
+
+        ng = NeighborGraph()
+        ng.add_relation(NeighborRelation("C_CENTRO", "C_INTERIOR", ho_count=50, distance_km=0.1))
+        ng.add_relation(NeighborRelation("C_INTERIOR", "C_EXTERIOR", ho_count=20, distance_km=1.2))
+
+        rules = FrequencyRules(
+            freq_range_start=100,
+            freq_range_end=124,
+            num_generations=2,
+            population_size=10,
+            num_runs=1
+        )
+
+        z1 = OptimizationZone("z1", "Zona 1", self.poly_inner, rules=rules, execution_order=1)
+        z2 = OptimizationZone("z2", "Zona 2", self.poly_outer, rules=rules, execution_order=2)
+        assign_cells_to_zones(self.cells, [z1, z2])
+
+        optimizer = ClusterOptimizer(
+            cells=self.cells,
+            zones=[z1, z2],
+            global_neighbor_graph=ng,
+            frontier_distance_km=5.0
+        )
+
+        results = optimizer.run()
+        self.assertIn("z1", results)
+        self.assertIn("z2", results)
+        self.assertEqual(z1.status, "Completada")
+        self.assertEqual(z2.status, "Completada")
+
 
 if __name__ == "__main__":
     unittest.main()
+

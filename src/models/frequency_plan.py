@@ -170,3 +170,8 @@ class OptimizationResultList(list):
         self.per_run: dict[int, list[PlanResult]] = per_run or {}
         self.per_run_history: dict[int, list[tuple[int, float]]] = per_run_history or {}
 
+    @property
+    def best_plan(self) -> Optional[PlanResult]:
+        """Return the overall best plan (first item) or None if list is empty."""
+        return self[0] if len(self) > 0 else None
+

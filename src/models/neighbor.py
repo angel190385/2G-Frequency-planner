@@ -173,6 +173,18 @@ class NeighborGraph:
             "min": float(sorted_vals[0])
         }
 
+    def filter_by_cells(self, cell_ids: set[str] | list[str] | tuple[str, ...]) -> NeighborGraph:
+        """
+        Create and return a new NeighborGraph containing only relations where
+        both cell_a and cell_b are present in cell_ids.
+        """
+        sub_graph = NeighborGraph()
+        cell_set = set(cell_ids)
+        for relation in self._relations.values():
+            if relation.cell_a_id in cell_set and relation.cell_b_id in cell_set:
+                sub_graph.add_relation(relation)
+        return sub_graph
+
     def clear(self):
         self._relations.clear()
         self._by_cell.clear()
