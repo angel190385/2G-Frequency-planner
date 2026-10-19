@@ -312,6 +312,25 @@ class MainWindow(QMainWindow):
         self.btn_deselect_all.clicked.connect(self._deselect_all_cells)
         quick_layout.addWidget(self.btn_deselect_all)
 
+        self.btn_select_out_of_range = QPushButton("🎯 Solo fuera de rango")
+        self.btn_select_out_of_range.setToolTip(
+            "Selecciona automáticamente solo las frecuencias (BCCH y TCH) que estén\n"
+            "fuera del rango permitido actual, cambiando lo mínimo necesario."
+        )
+        self.btn_select_out_of_range.setStyleSheet("""
+            QPushButton {
+                background-color: #1e2b3e;
+                color: #00d4aa;
+                border: 1px solid #00d4aa;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover { background-color: #00d4aa; color: #1e272e; }
+        """)
+        self.btn_select_out_of_range.clicked.connect(self._select_only_out_of_range)
+        quick_layout.addWidget(self.btn_select_out_of_range)
+
         self.btn_recalc_all_tch = QPushButton("Recalcular todos los TCH")
         self.btn_recalc_all_tch.setToolTip("Marca 'Recalc' de todas las celdas y selecciona todos los TCH existentes para recalcular.")
         self.btn_recalc_all_tch.clicked.connect(self._recalculate_all_tch)
@@ -923,11 +942,76 @@ class MainWindow(QMainWindow):
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""
+        old_start = self.rules.freq_range_start
+        old_end = self.rules.freq_range_end
+        old_excl = set(self.rules.excluded_frequencies)
+
         dialog = RulesDialog(self.rules, cells=self.cells, results=self.results, parent=self)
         if dialog.exec() == RulesDialog.DialogCode.Accepted:
             self.rules = dialog.get_rules()
-            self._update_status()
-            self.status_label.setText("Reglas actualizadas")
+
+            # Synchronize zone rules if any exist
+            if hasattr(self, "zone_map_widget") and self.zone_map_widget and self.zone_map_widget.zones:
+                for z in self.zone_map_widget.zones:
+                    if hasattr(z, "rules") and z.rules:
+                        z.rules.freq_range_start = self.rules.freq_range_start
+                        z.rules.freq_range_end = self.rules.freq_range_end
+                        z.rules.excluded_frequencies = list(self.rules.excluded_frequencies)
+
+            new_excl = set(self.rules.excluded_frequencies)
+            range_changed = (old_start != self.rules.freq_range_start or
+                             old_end != self.rules.freq_range_end or
+                             old_excl != new_excl)
+
+            if range_changed and self.cells:
+                self._select_only_out_of_range()
+                self.status_label.setText(
+                    f"Reglas actualizadas (Rango {self.rules.freq_range_start}-{self.rules.freq_range_end}). "
+                    "Marcadas por defecto solo frecuencias fuera de rango."
+                )
+            else:
+                self._update_status()
+                self.status_label.setText("Reglas actualizadas")
+
+    def _select_only_out_of_range(self):
+        """
+        Quick action in Calculation tab:
+        Select only cells and frequencies that are outside the allowed frequency pool.
+        Frequencies within the allowed range remain untouched (minimum change principle).
+        """
+        allowed_pool = set(self.rules.available_frequencies) if self.rules else set()
+        if not allowed_pool:
+            QMessageBox.information(
+                self, "Pool vacío",
+                "No hay frecuencias disponibles configuradas en las reglas actuales."
+            )
+            return
+
+        recalc_cells = 0
+        recalc_vars = 0
+        for cell in self.cells.values():
+            # BCCH: only recalculate if None, <= 0, or outside allowed_pool
+            if cell.bcch is None or cell.bcch <= 0 or cell.bcch not in allowed_pool:
+                cell.recalculate_bcch = True
+            else:
+                cell.recalculate_bcch = False
+
+            # TCH: only recalculate indices with frequencies outside allowed_pool
+            cell.tch_indices_to_recalculate = [
+                i for i, f in enumerate(cell.tch_list)
+                if f is None or f <= 0 or f not in allowed_pool
+            ]
+            cell.new_tch_count = 0
+
+            if cell.needs_calculation:
+                recalc_cells += 1
+                recalc_vars += cell.count_variables()
+
+        self._refresh_calc_table()
+        self._update_status()
+        self.status_label.setText(
+            f"Selección mínima aplicada: {recalc_cells} celdas con {recalc_vars} frecuencias fuera del rango ({self.rules.freq_range_start}-{self.rules.freq_range_end})."
+        )
 
     def _apply_calc_selections(self):
         """

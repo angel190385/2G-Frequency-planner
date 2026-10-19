@@ -91,8 +91,8 @@ class OptimizationZone:
 
     # Specific settings for this zone
     rules: FrequencyRules = field(default_factory=FrequencyRules)
-    recalculate_bcch: bool = True
-    recalculate_tch: bool = True
+    recalculate_bcch: bool = False
+    recalculate_tch: bool = False
     new_tch_count: int = 0
 
     # Zone-specific neighbors and handovers if loaded

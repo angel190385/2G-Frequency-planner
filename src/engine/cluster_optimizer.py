@@ -158,11 +158,22 @@ class ClusterOptimizer:
                     continue
                 c = copy.deepcopy(self.cells[cid])
                 if not self.respect_cell_flags:
-                    c.recalculate_bcch = zone.recalculate_bcch
+                    allowed_pool = set(zone.rules.available_frequencies) if hasattr(zone, "rules") and zone.rules else set()
+                    if zone.recalculate_bcch:
+                        c.recalculate_bcch = True
+                    else:
+                        c.recalculate_bcch = bool(c.bcch is None or c.bcch <= 0 or (allowed_pool and c.bcch not in allowed_pool))
+
                     if zone.recalculate_tch:
                         c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
                     else:
-                        c.tch_indices_to_recalculate = []
+                        if allowed_pool:
+                            c.tch_indices_to_recalculate = [
+                                i for i, f in enumerate(c.tch_list)
+                                if f is None or f <= 0 or f not in allowed_pool
+                            ]
+                        else:
+                            c.tch_indices_to_recalculate = []
                     c.new_tch_count = zone.new_tch_count
                 cells_to_eval[cid] = c
 
@@ -315,11 +326,22 @@ class ClusterOptimizerThread(QThread):
                         continue
                     c = copy.deepcopy(self.optimizer.cells[cid])
                     if not self.respect_cell_flags:
-                        c.recalculate_bcch = zone.recalculate_bcch
+                        allowed_pool = set(zone.rules.available_frequencies) if hasattr(zone, "rules") and zone.rules else set()
+                        if zone.recalculate_bcch:
+                            c.recalculate_bcch = True
+                        else:
+                            c.recalculate_bcch = bool(c.bcch is None or c.bcch <= 0 or (allowed_pool and c.bcch not in allowed_pool))
+
                         if zone.recalculate_tch:
                             c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
                         else:
-                            c.tch_indices_to_recalculate = []
+                            if allowed_pool:
+                                c.tch_indices_to_recalculate = [
+                                    i for i, f in enumerate(c.tch_list)
+                                    if f is None or f <= 0 or f not in allowed_pool
+                                ]
+                            else:
+                                c.tch_indices_to_recalculate = []
                         c.new_tch_count = zone.new_tch_count
                     cells_to_eval[cid] = c
 

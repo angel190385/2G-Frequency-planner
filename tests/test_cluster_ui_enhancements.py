@@ -212,6 +212,78 @@ class TestClusterUIEnhancements(unittest.TestCase):
 
         win.close()
 
+    def test_apply_zones_minimum_out_of_range_selection(self):
+        """Test that applying zones flags only frequencies outside the allowed range by default."""
+        win = MainWindow()
+        st = Station("ST1", "Emplazamiento 1", 40.4, -3.7)
+
+        # C1 has all frequencies within 1..50
+        c1 = Cell("C1", st, 1, bcch=10, tch_list=[12, 14])
+        # C2 has BCCH=80 (out) and TCH2=85 (out), while TCH1=12 is in
+        c2 = Cell("C2", st, 2, bcch=80, tch_list=[12, 85])
+
+        win.cells = {"C1": c1, "C2": c2}
+        win.zone_map_widget.cells = win.cells
+
+        rules = FrequencyRules(freq_range_start=1, freq_range_end=50)
+        win.rules = rules
+
+        z = OptimizationZone(
+            zone_id="z_test",
+            name="Zona Test",
+            polygon_coords=[(40.0, -3.0), (40.1, -3.0), (40.1, -3.1)],
+            cell_ids={"C1", "C2"},
+            rules=rules
+        )
+        self.assertFalse(z.recalculate_bcch)
+        self.assertFalse(z.recalculate_tch)
+
+        win.zone_map_widget.zones = [z]
+        win.zone_map_widget._apply_zones_to_calc_table()
+
+        # C1 should be completely untouched because all frequencies are within 1..50
+        self.assertFalse(c1.recalculate_bcch)
+        self.assertEqual(c1.tch_indices_to_recalculate, [])
+        self.assertFalse(c1.needs_calculation)
+
+        # C2 should only recalculate BCCH and TCH index 1 (85), not TCH index 0 (12)
+        self.assertTrue(c2.recalculate_bcch)
+        self.assertEqual(c2.tch_indices_to_recalculate, [1])
+        self.assertTrue(c2.needs_calculation)
+
+        # Now test forced recalculation when zone checkboxes are checked
+        z.recalculate_bcch = True
+        z.recalculate_tch = True
+        win.zone_map_widget._apply_zones_to_calc_table()
+
+        self.assertTrue(c1.recalculate_bcch)
+        self.assertEqual(c1.tch_indices_to_recalculate, [0, 1])
+        self.assertTrue(c2.recalculate_bcch)
+        self.assertEqual(c2.tch_indices_to_recalculate, [0, 1])
+
+        win.close()
+
+    def test_select_only_out_of_range_action(self):
+        """Test the 'Solo fuera de rango' quick action in MainWindow."""
+        win = MainWindow()
+        st = Station("ST1", "Emplazamiento 1", 40.4, -3.7)
+        c1 = Cell("C1", st, 1, bcch=10, tch_list=[12, 14])
+        c2 = Cell("C2", st, 2, bcch=80, tch_list=[12, 85])
+        win.cells = {"C1": c1, "C2": c2}
+        win.rules = FrequencyRules(freq_range_start=1, freq_range_end=50)
+
+        self.assertTrue(hasattr(win, "btn_select_out_of_range"))
+
+        # Trigger quick action
+        win._select_only_out_of_range()
+
+        self.assertFalse(c1.recalculate_bcch)
+        self.assertEqual(c1.tch_indices_to_recalculate, [])
+        self.assertTrue(c2.recalculate_bcch)
+        self.assertEqual(c2.tch_indices_to_recalculate, [1])
+
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

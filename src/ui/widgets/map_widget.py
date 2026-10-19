@@ -840,6 +840,10 @@ class MapWidget(QWidget):
             # 3. BCCH checkbox
             chk_b = QCheckBox()
             chk_b.setChecked(z.recalculate_bcch)
+            chk_b.setToolTip(
+                "Marcar para forzar el recálculo de TODOS los BCCH de la zona.\n"
+                "Desmarcado: recalcula solo los BCCH fuera del rango permitido."
+            )
             chk_b.toggled.connect(lambda chk, zone=z: setattr(zone, "recalculate_bcch", chk))
             w_b = QWidget()
             l_b = QHBoxLayout(w_b)
@@ -851,6 +855,10 @@ class MapWidget(QWidget):
             # 4. TCH checkbox
             chk_t = QCheckBox()
             chk_t.setChecked(z.recalculate_tch)
+            chk_t.setToolTip(
+                "Marcar para forzar el recálculo de TODOS los TCH de la zona.\n"
+                "Desmarcado: recalcula solo los TCH fuera del rango permitido."
+            )
             chk_t.toggled.connect(lambda chk, zone=z: setattr(zone, "recalculate_tch", chk))
             w_t = QWidget()
             l_t = QHBoxLayout(w_t)
@@ -959,17 +967,35 @@ class MapWidget(QWidget):
             c.tch_indices_to_recalculate = []
             c.new_tch_count = 0
 
-        # Mark cells inside zones
+        # Mark cells inside zones (defaulting to minimum change: only frequencies out of allowed pool)
         selected_count = 0
         for z in self.zones:
+            active_rules = z.rules if (hasattr(z, "rules") and z.rules) else self.rules
+            allowed_pool = set(active_rules.available_frequencies) if active_rules else set()
+
             for cid in z.cell_ids:
                 if cid in self.cells:
                     c = self.cells[cid]
-                    c.recalculate_bcch = z.recalculate_bcch
+                    # BCCH: If z.recalculate_bcch is True, force all BCCHs in the zone to recalculate.
+                    # Otherwise, only recalculate out-of-range BCCHs (or missing/invalid ones).
+                    if z.recalculate_bcch:
+                        c.recalculate_bcch = True
+                    else:
+                        c.recalculate_bcch = bool(c.bcch is None or c.bcch <= 0 or (allowed_pool and c.bcch not in allowed_pool))
+
+                    # TCH: If z.recalculate_tch is True, force all TCHs in the zone to recalculate.
+                    # Otherwise, only recalculate TCH indices with frequencies outside the allowed pool.
                     if z.recalculate_tch:
                         c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
                     else:
-                        c.tch_indices_to_recalculate = []
+                        if allowed_pool:
+                            c.tch_indices_to_recalculate = [
+                                i for i, f in enumerate(c.tch_list)
+                                if f is None or f <= 0 or f not in allowed_pool
+                            ]
+                        else:
+                            c.tch_indices_to_recalculate = []
+
                     c.new_tch_count = z.new_tch_count
                     selected_count += 1
 

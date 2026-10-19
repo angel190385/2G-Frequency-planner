@@ -50,11 +50,13 @@ class ZoneConfigDialog(QDialog):
         freq_group = QGroupBox("Frecuencias a Recalcular en esta Zona")
         fg_layout = QVBoxLayout(freq_group)
 
-        self.chk_bcch = QCheckBox("Recalcular canales BCCH")
+        self.chk_bcch = QCheckBox("Forzar recálculo de todos los canales BCCH")
+        self.chk_bcch.setToolTip("Si está desmarcado, solo se recalculan los canales BCCH fuera del rango permitido.")
         self.chk_bcch.setChecked(self.zone.recalculate_bcch)
         fg_layout.addWidget(self.chk_bcch)
 
-        self.chk_tch = QCheckBox("Recalcular canales TCH existentes")
+        self.chk_tch = QCheckBox("Forzar recálculo de todos los canales TCH existentes")
+        self.chk_tch.setToolTip("Si está desmarcado, solo se recalculan los canales TCH fuera del rango permitido.")
         self.chk_tch.setChecked(self.zone.recalculate_tch)
         fg_layout.addWidget(self.chk_tch)
 

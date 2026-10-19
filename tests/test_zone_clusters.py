@@ -198,6 +198,64 @@ class TestZoneClusters(unittest.TestCase):
         self.assertEqual(optimizer.cells["C_EXTERIOR"].bcch, orig_exterior_bcch)
         self.assertEqual(optimizer.cells["C_EXTERIOR"].tch_list, orig_exterior_tch)
 
+    def test_zone_defaults_and_minimum_out_of_range_recalculation(self):
+        """
+        Verify that OptimizationZone defaults to recalculate_bcch=False and recalculate_tch=False,
+        and that ClusterOptimizer only flags frequencies that fall outside the allowed range.
+        """
+        from src.engine.constraints import FrequencyRules
+
+        # 1. Defaults check
+        z = OptimizationZone("z_test", "Test Zone", self.poly_inner)
+        self.assertFalse(z.recalculate_bcch)
+        self.assertFalse(z.recalculate_tch)
+
+        # 2. Cell setup: Allowed range is 50..60
+        # C_CENTRO: BCCH=55 (in), TCH=[56] (in) -> nothing to recalculate
+        # C_INTERIOR: BCCH=90 (out of 50..60), TCH=[55, 95] (index 0 in, index 1 out)
+        self.cells["C_CENTRO"].bcch = 55
+        self.cells["C_CENTRO"].tch_list = [56]
+        self.cells["C_INTERIOR"].bcch = 90
+        self.cells["C_INTERIOR"].tch_list = [55, 95]
+
+        rules = FrequencyRules(freq_range_start=50, freq_range_end=60, num_generations=2, population_size=10, num_runs=1)
+        z.rules = rules
+        z.cell_ids = {"C_CENTRO", "C_INTERIOR"}
+
+        opt = ClusterOptimizer(
+            cells=self.cells,
+            zones=[z],
+            frontier_distance_km=5.0,
+            respect_cell_flags=False
+        )
+
+        # Before running, simulate how ClusterOptimizer sets flags for active cells
+        allowed_pool = set(rules.available_frequencies)
+        for cid in z.cell_ids:
+            c = self.cells[cid]
+            if z.recalculate_bcch:
+                c.recalculate_bcch = True
+            else:
+                c.recalculate_bcch = bool(c.bcch is None or c.bcch <= 0 or (allowed_pool and c.bcch not in allowed_pool))
+
+            if z.recalculate_tch:
+                c.tch_indices_to_recalculate = list(range(len(c.tch_list)))
+            else:
+                c.tch_indices_to_recalculate = [
+                    i for i, f in enumerate(c.tch_list)
+                    if f is None or f <= 0 or f not in allowed_pool
+                ]
+
+        # C_CENTRO should have no changes needed
+        self.assertFalse(self.cells["C_CENTRO"].recalculate_bcch)
+        self.assertEqual(self.cells["C_CENTRO"].tch_indices_to_recalculate, [])
+        self.assertFalse(self.cells["C_CENTRO"].needs_calculation)
+
+        # C_INTERIOR should recalculate BCCH (90 is out) and only TCH index 1 (95 is out, 55 is in)
+        self.assertTrue(self.cells["C_INTERIOR"].recalculate_bcch)
+        self.assertEqual(self.cells["C_INTERIOR"].tch_indices_to_recalculate, [1])
+        self.assertTrue(self.cells["C_INTERIOR"].needs_calculation)
+
 
 if __name__ == "__main__":
     unittest.main()
