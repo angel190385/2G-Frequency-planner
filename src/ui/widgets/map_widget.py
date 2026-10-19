@@ -54,9 +54,11 @@ class MapWidget(QWidget):
     """
     cluster_optimization_completed = pyqtSignal(dict, dict)  # (zone_results, updated_cells)
     zone_selection_applied = pyqtSignal()
+    zones_changed = pyqtSignal(list)
 
-    def __init__(self, parent=None):
+    def __init__(self, mode: str = "full", parent=None):
         super().__init__(parent)
+        self.mode = mode  # "zones", "results", or "full"
         self.cells: dict[str, Cell] = {}
         self.results: list[PlanResult] = []
         self.neighbor_graph = None
@@ -86,72 +88,87 @@ class MapWidget(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)
 
-        # Controls header
-        ctrl_box = QGroupBox("🗺️ Filtros y Controles del Mapa")
-        ctrl_main_layout = QVBoxLayout(ctrl_box)
-        ctrl_main_layout.setContentsMargins(8, 6, 8, 6)
-        ctrl_main_layout.setSpacing(6)
-
-        # Row 1: Primary Selectors
-        row1 = QHBoxLayout()
-        row1.setSpacing(10)
-
-        row1.addWidget(QLabel("Plan:"))
+        # Initialize common controls
         self.combo_plan = QComboBox()
         self.combo_plan.addItem("Original (Antes de calcular)", -1)
         self.combo_plan.currentIndexChanged.connect(self._on_filter_changed)
-        row1.addWidget(self.combo_plan)
 
-        row1.addWidget(QLabel("Canal:"))
         self.combo_freq = QComboBox()
         self.combo_freq.addItem("Todos", -1)
         self.combo_freq.currentIndexChanged.connect(self._on_filter_changed)
-        row1.addWidget(self.combo_freq)
 
-        row1.addWidget(QLabel("Celda:"))
         self.combo_cell = QComboBox()
         self.combo_cell.addItem("🔍 Todas las celdas", "")
         self.combo_cell.currentIndexChanged.connect(self._on_cell_selected)
-        row1.addWidget(self.combo_cell)
 
-        row1.addWidget(QLabel("Coincidencias:"))
         self.combo_conflicts = QComboBox()
         self.combo_conflicts.addItem("Todas", "all")
         self.combo_conflicts.addItem("Solo Cocanalidades (Rojo)", "cochannel")
         self.combo_conflicts.addItem("Solo Adyacencias (Naranja)", "adjacent")
         self.combo_conflicts.addItem("Ocultar líneas", "none")
         self.combo_conflicts.currentIndexChanged.connect(self._on_filter_changed)
-        row1.addWidget(self.combo_conflicts)
-
-        ctrl_main_layout.addLayout(row1)
-
-        # Row 2: Dynamic Viewport & Layer Filters
-        row2 = QHBoxLayout()
-        row2.setSpacing(14)
 
         self.chk_viewport_filter = QCheckBox("👁️ Filtrar líneas a la vista actual")
         self.chk_viewport_filter.setChecked(True)
         self.chk_viewport_filter.toggled.connect(self._on_viewport_filter_toggled)
-        row2.addWidget(self.chk_viewport_filter)
 
         self.chk_only_modified = QCheckBox("🔄 Solo celdas modificadas")
         self.chk_only_modified.setChecked(False)
         self.chk_only_modified.toggled.connect(self._on_filter_changed)
-        row2.addWidget(self.chk_only_modified)
 
         self.chk_isolate_cell = QCheckBox("🎯 Aislar celda y colorear conflictos")
         self.chk_isolate_cell.setChecked(False)
         self.chk_isolate_cell.toggled.connect(self._on_isolate_cell_toggled)
-        row2.addWidget(self.chk_isolate_cell)
-
-        row2.addStretch()
 
         btn_center = QPushButton("🎯 Centrar Mapa")
         btn_center.clicked.connect(self._reset_map_view)
-        row2.addWidget(btn_center)
 
-        ctrl_main_layout.addLayout(row2)
-        left_layout.addWidget(ctrl_box)
+        if self.mode == "zones":
+            # Clean toolbar specifically tailored for defining clusters/zones
+            ctrl_box = QGroupBox("🗺️ Controles del Mapa de Zonas")
+            ctrl_layout = QHBoxLayout(ctrl_box)
+            ctrl_layout.setContentsMargins(8, 6, 8, 6)
+            ctrl_layout.setSpacing(10)
+
+            ctrl_layout.addWidget(QLabel("Canal BCCH:"))
+            ctrl_layout.addWidget(self.combo_freq)
+            ctrl_layout.addWidget(QLabel("Buscar Celda:"))
+            ctrl_layout.addWidget(self.combo_cell)
+            ctrl_layout.addStretch()
+            ctrl_layout.addWidget(btn_center)
+            left_layout.addWidget(ctrl_box)
+
+        else:
+            # Full analytical controls for Results Map or Full Map
+            ctrl_box = QGroupBox("🗺️ Filtros y Controles del Mapa")
+            ctrl_main_layout = QVBoxLayout(ctrl_box)
+            ctrl_main_layout.setContentsMargins(8, 6, 8, 6)
+            ctrl_main_layout.setSpacing(6)
+
+            # Row 1: Primary Selectors
+            row1 = QHBoxLayout()
+            row1.setSpacing(10)
+            row1.addWidget(QLabel("Plan:"))
+            row1.addWidget(self.combo_plan)
+            row1.addWidget(QLabel("Canal:"))
+            row1.addWidget(self.combo_freq)
+            row1.addWidget(QLabel("Celda:"))
+            row1.addWidget(self.combo_cell)
+            row1.addWidget(QLabel("Coincidencias:"))
+            row1.addWidget(self.combo_conflicts)
+            ctrl_main_layout.addLayout(row1)
+
+            # Row 2: Dynamic Viewport & Layer Filters
+            row2 = QHBoxLayout()
+            row2.setSpacing(14)
+            row2.addWidget(self.chk_viewport_filter)
+            row2.addWidget(self.chk_only_modified)
+            row2.addWidget(self.chk_isolate_cell)
+            row2.addStretch()
+            row2.addWidget(btn_center)
+            ctrl_main_layout.addLayout(row2)
+
+            left_layout.addWidget(ctrl_box)
 
         # WebEngine Map View with custom page
         self.web_view = QWebEngineView()
@@ -166,9 +183,14 @@ class MapWidget(QWidget):
         self.splitter.addWidget(left_widget)
 
         # ── RIGHT: Zones & Clusters Panel ────────────────────────────────
-        self.zone_panel = self._build_zone_panel()
-        self.splitter.addWidget(self.zone_panel)
-        self.splitter.setSizes([850, 370])
+        if self.mode != "results":
+            self.zone_panel = self._build_zone_panel()
+            self.splitter.addWidget(self.zone_panel)
+            self.splitter.setSizes([850, 370])
+        else:
+            self.zone_panel = None
+            self.splitter.setSizes([1200, 0])
+            self.splitter.setHandleWidth(0)
 
         main_layout.addWidget(self.splitter)
 
@@ -769,9 +791,31 @@ class MapWidget(QWidget):
             })
         js_code = f"renderZones({json.dumps(zones_data)});"
         self.web_view.page().runJavaScript(js_code)
+        self.zones_changed.emit(self.zones)
+
+    def set_zones(self, zones: list[OptimizationZone]):
+        """Set zones externally (e.g. synchronized from another map widget)."""
+        self.zones = list(zones)
+        if hasattr(self, "table_zones") and self.table_zones:
+            assign_cells_to_zones(self.cells, self.zones)
+            self._update_zones_table()
+        zones_data = []
+        for z in self.zones:
+            zones_data.append({
+                "id": z.zone_id,
+                "name": z.name,
+                "coords": z.polygon_coords,
+                "color": z.color,
+                "cell_count": z.cell_count,
+                "order": z.execution_order
+            })
+        js_code = f"renderZones({json.dumps(zones_data)});"
+        self.web_view.page().runJavaScript(js_code)
 
     def _update_zones_table(self):
         """Refresh the zones QTableWidget."""
+        if not hasattr(self, "table_zones") or not self.table_zones:
+            return
         self.table_zones.blockSignals(True)
         self.table_zones.setRowCount(len(self.zones))
 
@@ -1009,7 +1053,8 @@ class MapWidget(QWidget):
         # Reassign zones if any exist
         if self.zones:
             assign_cells_to_zones(self.cells, self.zones)
-            self._update_zones_table()
+            if hasattr(self, "table_zones") and self.table_zones:
+                self._update_zones_table()
             self._refresh_zones_on_map()
 
         # Populate plan combo box

@@ -194,21 +194,31 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(neighbor_ho_widget, "🔗 Vecindades & HO")
 
-        # ── Tab 3: Calculation ─────────────────────────────────────
-        calc_widget = self._build_calc_tab()
-        self.tabs.addTab(calc_widget, "🚀 Cálculo")
+        # ── Tab 3: Map 1 - Zones & Clusters (Pre-Calculation) ─────
+        self.zone_map_widget = MapWidget(mode="zones")
+        self.zone_map_widget.cluster_optimization_completed.connect(self._on_cluster_optimization_completed)
+        self.zone_map_widget.zone_selection_applied.connect(self._on_zone_selection_applied)
+        self.tabs.addTab(self.zone_map_widget, "🗺️ Zonas y Clústeres")
 
-        # ── Tab 4: Results ─────────────────────────────────────────
+        # ── Tab 4: Calculation ─────────────────────────────────────
+        self.calc_tab_widget = self._build_calc_tab()
+        self.tabs.addTab(self.calc_tab_widget, "🚀 Cálculo")
+
+        # ── Tab 5: Results ─────────────────────────────────────────
         self.result_widget = ResultComparisonWidget()
         self.result_widget.btn_export.clicked.connect(self._export_results)
         self.result_widget.btn_export_html.clicked.connect(self._export_html)
         self.tabs.addTab(self.result_widget, "📈 Resultados")
 
-        # ── Tab 5: Interactive Map ────────────────────────────────
-        self.map_widget = MapWidget()
-        self.map_widget.cluster_optimization_completed.connect(self._on_cluster_optimization_completed)
-        self.map_widget.zone_selection_applied.connect(self._on_zone_selection_applied)
-        self.tabs.addTab(self.map_widget, "🗺️ Mapa de Frecuencias")
+        # ── Tab 6: Map 2 - Frequency / Results Map (Post-Calculation)
+        self.result_map_widget = MapWidget(mode="results")
+        self.tabs.addTab(self.result_map_widget, "🗺️ Mapa de Resultados")
+
+        # Backward compatibility alias
+        self.map_widget = self.zone_map_widget
+
+        # Synchronize zone outlines to results map
+        self.zone_map_widget.zones_changed.connect(self.result_map_widget.set_zones)
 
         main_layout.addWidget(self.tabs)
 
@@ -705,20 +715,22 @@ class MainWindow(QMainWindow):
                 self.stations = stations
                 self.cell_table.load_cells(cells)
                 self._refresh_calc_table()
-                self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
                 fname = os.path.basename(file_path)
                 self.status_label.setText(
                     f"Celdas importadas ({fname}): {len(cells)} celdas de {len(stations)} estaciones"
                 )
-                # Automatically direct user to the map tab to select a subset of cells
-                self.tabs.setCurrentWidget(self.map_widget)
+                # Automatically direct user to the zones map tab to trace clusters
+                self.tabs.setCurrentWidget(self.zone_map_widget)
 
             elif import_type == "neighbors":
                 graph, warnings = load_neighbors(file_path, self.cells)
                 self.neighbor_graph = graph
                 self.neighbor_table.load_data(graph, self.cells)
                 self.ho_table.load_data(graph, self.cells)
-                self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+                self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
                 self.status_label.setText(
                     f"Vecindades importadas: {graph.total_relations} relaciones")
 
@@ -750,13 +762,14 @@ class MainWindow(QMainWindow):
             self.stations = dlg.imported_stations
             self.cell_table.load_cells(self.cells)
             self._refresh_calc_table()
-            self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+            self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+            self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
             self.status_label.setText(
                 f"Red t_Planner importada: {len(self.cells)} celdas en {len(self.stations)} estaciones"
             )
             self._update_status()
-            # Switch to map tab automatically so the user can see the network and trace zones
-            self.tabs.setCurrentWidget(self.map_widget)
+            # Switch to zones map tab automatically so the user can see the network and trace zones
+            self.tabs.setCurrentWidget(self.zone_map_widget)
 
     def _on_cluster_optimization_completed(self, zone_results: dict, updated_cells: dict):
         """Handle completion of sequential cluster/zone optimization."""
@@ -789,7 +802,9 @@ class MainWindow(QMainWindow):
         res_list = OptimizationResultList([consolidated_plan], per_run={1: [consolidated_plan]})
         self.results = res_list
         self.result_widget.load_results(res_list, self.cells, self.neighbor_graph, self.rules)
-        self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+        self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+        self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+        self.tabs.setCurrentWidget(self.result_map_widget)
 
         try:
             export_execution_bundle(
@@ -804,8 +819,8 @@ class MainWindow(QMainWindow):
     def _on_zone_selection_applied(self):
         """Called when polygon zones selection is applied to the Calculation table."""
         self._refresh_calc_table()
-        # Switch to calculation tab (tab index 2)
-        self.tabs.setCurrentIndex(2)
+        # Switch to calculation tab
+        self.tabs.setCurrentWidget(self.calc_tab_widget)
         self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo")
 
     def _open_rules_dialog(self):
@@ -973,8 +988,9 @@ class MainWindow(QMainWindow):
 
         # Show results
         self.result_widget.load_results(results, self.cells, self.neighbor_graph, self.rules)
-        self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-        self.tabs.setCurrentIndex(3)  # Switch to Results tab
+        self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+        self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+        self.tabs.setCurrentWidget(self.result_widget)  # Switch to Results tab
 
     def _on_optimization_error(self, error_msg):
         """Handle optimization error."""
@@ -1043,7 +1059,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == RangeAdaptationDialog.DialogCode.Accepted:
             self._update_status()
             self._refresh_calc_table()
-            self.tabs.setCurrentIndex(2)  # Switch to Calculation tab
+            self.tabs.setCurrentWidget(self.calc_tab_widget)  # Switch to Calculation tab
             self.status_label.setText(
                 f"Espectro reconfigurado a {self.rules.freq_range_start}-{self.rules.freq_range_end}"
             )
