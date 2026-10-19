@@ -628,20 +628,39 @@ class ResultComparisonWidget(QWidget):
                 else:
                     z_res_obj = z_res
 
-                # Scope plan assignments to zone cells if polygon cells are defined
+                # Scope plan assignments and score strictly to zone cells
                 if z_cids:
+                    from src.engine.cost_function import evaluate_plan
                     scoped_plans = []
                     for p in z_res_obj:
-                        p_copy = copy.copy(p)
-                        p_copy.assignments = [a for a in p.assignments if a.cell_id in z_cids]
-                        scoped_plans.append(p_copy)
+                        scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in z_cids}
+                        p_eval = evaluate_plan(
+                            assignments=scoped_assigns,
+                            cells=zone_cells,
+                            neighbor_graph=z_ng,
+                            rules=getattr(zone_obj, "rules", rules) or rules,
+                            plan_id=p.plan_id,
+                            run_id=p.run_id,
+                            collect_violations=True
+                        )
+                        p_eval.convergence_history = getattr(p, "convergence_history", [])
+                        scoped_plans.append(p_eval)
                     scoped_per_run = {}
                     for r_id, r_plans in getattr(z_res_obj, "per_run", {}).items():
                         scoped_r_plans = []
                         for p in r_plans:
-                            p_copy = copy.copy(p)
-                            p_copy.assignments = [a for a in p.assignments if a.cell_id in z_cids]
-                            scoped_r_plans.append(p_copy)
+                            scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in z_cids}
+                            p_eval = evaluate_plan(
+                                assignments=scoped_assigns,
+                                cells=zone_cells,
+                                neighbor_graph=z_ng,
+                                rules=getattr(zone_obj, "rules", rules) or rules,
+                                plan_id=p.plan_id,
+                                run_id=p.run_id,
+                                collect_violations=True
+                            )
+                            p_eval.convergence_history = getattr(p, "convergence_history", [])
+                            scoped_r_plans.append(p_eval)
                         scoped_per_run[r_id] = scoped_r_plans
                     z_res_scoped = OptimizationResultList(
                         scoped_plans,

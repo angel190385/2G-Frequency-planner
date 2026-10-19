@@ -135,7 +135,8 @@ def run_single_worker_run(
     queue: Optional[object] = None,
     cancel_event: Optional[object] = None,
     seed: Optional[int] = None,
-    sub_id: int = 0
+    sub_id: int = 0,
+    active_cell_ids: Optional[set[str]] = None
 ) -> tuple[int, list[PlanResult], list[tuple[int, float]]]:
     """
     Independent genetic algorithm pass executed on a dedicated CPU process worker.
@@ -144,7 +145,7 @@ def run_single_worker_run(
         random.seed(seed)
         np.random.seed(seed)
 
-    fe = FastPlanEvaluator(cells, neighbor_graph, rules)
+    fe = FastPlanEvaluator(cells, neighbor_graph, rules, active_cell_ids=active_cell_ids)
     freq_pool = np.array(rules.available_frequencies, dtype=np.int32)
     pool_size = len(freq_pool)
 
@@ -323,7 +324,8 @@ def run_parallel_optimizer(
     variables_data: list[tuple[str, str, int]],
     progress_callback: Optional[Callable] = None,
     max_workers: Optional[int] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    active_cell_ids: Optional[set[str]] = None
 ) -> OptimizationResultList:
     """
     Execute optimization across all CPU cores utilizing multiprocessing.
@@ -384,7 +386,8 @@ def run_parallel_optimizer(
                 queue=_DirectQueue(),
                 cancel_event=cancel_adapter,
                 seed=seed,
-                sub_id=s
+                sub_id=s,
+                active_cell_ids=active_cell_ids
             )
             per_run_candidates[r].extend(run_results)
             per_run_histories[r][s] = history
@@ -404,7 +407,7 @@ def run_parallel_optimizer(
             r_idx, s_idx, t_seed = task_tuple
             p = ctx.Process(
                 target=run_single_worker_run,
-                args=(r_idx, cells, neighbor_graph, rules, variables_data, queue, cancel_event, t_seed, s_idx)
+                args=(r_idx, cells, neighbor_graph, rules, variables_data, queue, cancel_event, t_seed, s_idx, active_cell_ids)
             )
             p.daemon = True
             p.start()

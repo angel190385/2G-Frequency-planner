@@ -256,6 +256,91 @@ class TestZoneClusters(unittest.TestCase):
         self.assertEqual(self.cells["C_INTERIOR"].tch_indices_to_recalculate, [1])
         self.assertTrue(self.cells["C_INTERIOR"].needs_calculation)
 
+    def test_polygon_cost_excludes_outside_cells(self):
+        """
+        Verify that cells outside the polygon do NOT sum to the optimization cost,
+        even if outside cells have severe co-channel hard violations among each other.
+        """
+        from src.engine.constraints import FrequencyRules
+        from src.models.neighbor import NeighborGraph, NeighborRelation
+        from src.engine.fast_evaluator import FastPlanEvaluator
+
+        # Create two outside cells with identical frequencies (co-channel hard violation)
+        st_out1 = Station("S_OUT1", "Out 1", 40.4240, -3.7140)
+        st_out2 = Station("S_OUT2", "Out 2", 40.4241, -3.7141)
+        c_out1 = Cell("C_OUT1", st_out1, "1", 0.0, 75, [77])
+        c_out2 = Cell("C_OUT2", st_out2, "1", 0.0, 75, [77])  # Identical BCCH and TCH!
+
+        test_cells = dict(self.cells)
+        test_cells["C_OUT1"] = c_out1
+        test_cells["C_OUT2"] = c_out2
+
+        # Outside cells are direct neighbors with high HO weight
+        ng = NeighborGraph()
+        ng.add_relation(NeighborRelation("C_OUT1", "C_OUT2", ho_count=100, distance_km=0.1))
+        # Also polygon cell neighbors
+        ng.add_relation(NeighborRelation("C_CENTRO", "C_INTERIOR", ho_count=50, distance_km=0.1))
+
+        rules = FrequencyRules(
+            freq_range_start=50,
+            freq_range_end=60,
+            num_generations=2,
+            population_size=10,
+            num_runs=1
+        )
+
+        z = OptimizationZone("z_poly", "Polygon Zone", self.poly_inner, rules=rules)
+        z.cell_ids = {"C_CENTRO", "C_INTERIOR"}
+        z.recalculate_bcch = True
+        z.recalculate_tch = True
+
+        # 1. Test FastPlanEvaluator directly with active_cell_ids
+        eval_with_filter = FastPlanEvaluator(
+            cells=test_cells,
+            rules=rules,
+            neighbor_graph=ng,
+            active_cell_ids={"C_CENTRO", "C_INTERIOR"}
+        )
+        score_filtered = eval_with_filter.quick_score_matrix(eval_with_filter.base_freq_matrix)
+
+        # Without filter, the co-channel conflict between OUT1 and OUT2 triggers severe penalty (>10,000,000)
+        eval_without_filter = FastPlanEvaluator(
+            cells=test_cells,
+            rules=rules,
+            neighbor_graph=ng,
+            active_cell_ids=None
+        )
+        score_unfiltered = eval_without_filter.quick_score_matrix(eval_without_filter.base_freq_matrix)
+
+        self.assertGreater(score_unfiltered, 10_000_000, "Unfiltered score should include outside co-channel penalty")
+        self.assertLess(score_filtered, 100_000, "Filtered score must NOT include outside co-channel penalty")
+
+        # 2. Test evaluate_plan from cost_function directly
+        from src.models.frequency_plan import FrequencyAssignment
+        from src.engine.cost_function import evaluate_plan
+        assignments = {
+            cid: FrequencyAssignment(cell_id=cid, bcch=c.bcch, tch_list=list(c.tch_list))
+            for cid, c in test_cells.items()
+        }
+        res_filtered = evaluate_plan(assignments, test_cells, ng, rules, active_cell_ids={"C_CENTRO", "C_INTERIOR"})
+        res_unfiltered = evaluate_plan(assignments, test_cells, ng, rules, active_cell_ids=None)
+        self.assertGreater(res_unfiltered.score, 10_000_000)
+        self.assertLess(res_filtered.score, 100_000)
+
+        # 3. Test ClusterOptimizer with frontier_distance_km > 0
+        optimizer = ClusterOptimizer(
+            cells=test_cells,
+            zones=[z],
+            global_neighbor_graph=ng,
+            frontier_distance_km=5.0,
+            respect_cell_flags=False
+        )
+        results = optimizer.run()
+        self.assertIn("z_poly", results)
+        best_candidate = results["z_poly"][0]
+        # Candidate score must be small (purely polygon score), not polluted by outside cells
+        self.assertLess(best_candidate.score, 100_000, "Optimizer candidate score must not include outside cell penalties")
+
 
 if __name__ == "__main__":
     unittest.main()

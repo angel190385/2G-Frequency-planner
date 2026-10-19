@@ -1209,7 +1209,7 @@ class MainWindow(QMainWindow):
 
             workers = getattr(self, "spin_calc_workers", None)
             max_workers = workers.value() if workers else None
-            frontier_dist = self.zone_map_widget.spin_frontier.value() if hasattr(self.zone_map_widget, "spin_frontier") else 8.0
+            frontier_dist = self.zone_map_widget.spin_frontier.value() if hasattr(self.zone_map_widget, "spin_frontier") else 0.0
 
             self._baseline_cells = copy.deepcopy(self.cells)
             self._last_active_zones = active_zones

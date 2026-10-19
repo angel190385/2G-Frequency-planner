@@ -277,10 +277,11 @@ class MapWidget(QWidget):
         # 1. Frontier protection distance
         cfg_layout.addWidget(QLabel("Distancia frontera:"), 0, 0)
         self.spin_frontier = QDoubleSpinBox()
-        self.spin_frontier.setRange(1.0, 30.0)
-        self.spin_frontier.setValue(8.0)
+        self.spin_frontier.setRange(0.0, 30.0)
+        self.spin_frontier.setValue(0.0)
+        self.spin_frontier.setSpecialValueText("0 km (Solo polígono)")
         self.spin_frontier.setSuffix(" km")
-        self.spin_frontier.setToolTip("Radio de protección alrededor de la zona donde las celdas exteriores actúan como restricciones fijas")
+        self.spin_frontier.setToolTip("Radio de protección alrededor de la zona donde las celdas exteriores actúan como restricciones fijas (0 = solo celdas del polígono)")
         cfg_layout.addWidget(self.spin_frontier, 0, 1)
 
         # 2. Number of runs per zone

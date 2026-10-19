@@ -174,7 +174,8 @@ def precompute_close_cell_pairs(
     cells: dict[str, Cell],
     neighbor_graph: NeighborGraph,
     threshold_km: float,
-    rules: Optional[FrequencyRules] = None
+    rules: Optional[FrequencyRules] = None,
+    active_cell_ids: Optional[set[str]] = None
 ) -> list[tuple[str, str, float]]:
     """
     Precompute non-neighbor, different-station cell pairs within threshold_km.
@@ -234,6 +235,9 @@ def precompute_close_cell_pairs(
                 for ca_id in station_cells[sid_a]:
                     cell_a = cells.get(ca_id)
                     for cb_id in station_cells[sid_b]:
+                        if active_cell_ids is not None:
+                            if ca_id not in active_cell_ids and cb_id not in active_cell_ids:
+                                continue
                         pair_key = tuple(sorted((ca_id, cb_id)))
                         if pair_key not in neighbor_pairs:
                             cell_b = cells.get(cb_id)
@@ -251,7 +255,8 @@ def evaluate_plan(
     plan_id: int = 0,
     run_id: int = 1,
     collect_violations: bool = True,
-    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None
+    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None,
+    active_cell_ids: Optional[set[str]] = None
 ) -> PlanResult:
     """
     Evaluate a complete frequency plan.
@@ -277,6 +282,10 @@ def evaluate_plan(
 
         if ca_id not in assignments or cb_id not in assignments:
             continue
+
+        if active_cell_ids is not None:
+            if ca_id not in active_cell_ids and cb_id not in active_cell_ids:
+                continue
 
         pair_key = tuple(sorted((ca_id, cb_id)))
         if pair_key in checked_pairs:
@@ -393,6 +402,11 @@ def evaluate_plan(
             for j in range(i + 1, len(cell_ids)):
                 ca_id = cell_ids[i]
                 cb_id = cell_ids[j]
+
+                if active_cell_ids is not None:
+                    if ca_id not in active_cell_ids and cb_id not in active_cell_ids:
+                        continue
+
                 pair_key = tuple(sorted((ca_id, cb_id)))
                 if pair_key in checked_pairs:
                     continue
@@ -474,6 +488,8 @@ def evaluate_plan(
     # ── 3. Internal cell separation check ──────────────────────────
     # Under no circumstances can frequencies repeat in the same cell between BCCH and TCH or among TCHs
     for cid, assign in assignments.items():
+        if active_cell_ids is not None and cid not in active_cell_ids:
+            continue
         cell_orig = cells.get(cid)
         all_freqs = [("BCCH", assign.bcch)] + [("TCH", f) for f in assign.tch_list]
         for i in range(len(all_freqs)):
@@ -527,9 +543,12 @@ def evaluate_plan(
     if rules.enable_distance_penalty:
         close_pairs = precomputed_close_pairs
         if close_pairs is None:
-            close_pairs = precompute_close_cell_pairs(cells, neighbor_graph, rules.distance_threshold_km, rules=rules)
+            close_pairs = precompute_close_cell_pairs(cells, neighbor_graph, rules.distance_threshold_km, rules=rules, active_cell_ids=active_cell_ids)
 
         for ca_id, cb_id, dp in close_pairs:
+            if active_cell_ids is not None:
+                if ca_id not in active_cell_ids and cb_id not in active_cell_ids:
+                    continue
             a_assign = assignments.get(ca_id)
             b_assign = assignments.get(cb_id)
             if not a_assign or not b_assign:
@@ -567,7 +586,8 @@ def quick_score(
     cells: dict[str, Cell],
     neighbor_graph: NeighborGraph,
     rules: FrequencyRules,
-    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None
+    precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None,
+    active_cell_ids: Optional[set[str]] = None
 ) -> float:
     """
     Fast scoring without collecting detailed violations.
@@ -577,6 +597,7 @@ def quick_score(
         assignments, cells, neighbor_graph, rules,
         plan_id=0, run_id=1,
         collect_violations=False,
-        precomputed_close_pairs=precomputed_close_pairs
+        precomputed_close_pairs=precomputed_close_pairs,
+        active_cell_ids=active_cell_ids
     )
     return result.score

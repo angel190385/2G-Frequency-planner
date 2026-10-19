@@ -44,13 +44,15 @@ class FrequencyOptimizer:
         neighbor_graph: NeighborGraph,
         rules: FrequencyRules,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
-        max_workers: Optional[int] = None
+        max_workers: Optional[int] = None,
+        active_cell_ids: Optional[set[str]] = None
     ):
         self.cells = cells
         self.neighbor_graph = neighbor_graph
         self.rules = rules
         self.progress_callback = progress_callback
         self.max_workers = max_workers
+        self.active_cell_ids = set(active_cell_ids) if active_cell_ids is not None else None
         self._cancelled = False
 
         # Build the list of variables to optimize
@@ -65,7 +67,7 @@ class FrequencyOptimizer:
         # Precompute close cell pairs for distance penalty to avoid O(N^2) haversine calculation
         if self.rules.enable_distance_penalty:
             self.close_cell_pairs = precompute_close_cell_pairs(
-                self.cells, self.neighbor_graph, self.rules.distance_threshold_km, rules=self.rules
+                self.cells, self.neighbor_graph, self.rules.distance_threshold_km, rules=self.rules, active_cell_ids=self.active_cell_ids
             )
         else:
             self.close_cell_pairs = []
@@ -389,7 +391,8 @@ class FrequencyOptimizer:
             assignments = self._chromosome_to_assignments(np.array([], dtype=np.int32))
             result = evaluate_plan(
                 assignments, self.cells, self.neighbor_graph, self.rules, plan_id=1, run_id=1,
-                precomputed_close_pairs=self.close_cell_pairs
+                precomputed_close_pairs=self.close_cell_pairs,
+                active_cell_ids=self.active_cell_ids
             )
             return OptimizationResultList([result], per_run={1: [result]})
 
@@ -403,7 +406,8 @@ class FrequencyOptimizer:
             variables_data=variables_data,
             progress_callback=self.progress_callback,
             max_workers=self.max_workers,
-            cancel_check=lambda: self._cancelled
+            cancel_check=lambda: self._cancelled,
+            active_cell_ids=self.active_cell_ids
         )
 
 

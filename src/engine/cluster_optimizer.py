@@ -98,7 +98,7 @@ class ClusterOptimizer:
         zones: list[OptimizationZone],
         global_neighbor_graph: Optional[NeighborGraph] = None,
         progress_callback: Optional[Callable[[ZoneOptimizationProgress], None]] = None,
-        frontier_distance_km: float = 8.0,
+        frontier_distance_km: float = 0.0,
         max_workers: Optional[int] = None,
         respect_cell_flags: bool = False
     ):
@@ -142,13 +142,16 @@ class ClusterOptimizer:
 
             # 1. Prepare cells for this zone
             # Active cells have recalculation flags enabled
-            # Frontier cells are included with needs_calculation = False
-            frontier_ids = find_frontier_cells(
-                active_cell_ids,
-                self.cells,
-                threshold_km=getattr(zone.rules, "distance_threshold_km", self.frontier_distance_km),
-                neighbor_graph=zone.neighbor_graph or self.global_neighbor_graph
-            )
+            # Frontier cells are included with needs_calculation = False only if frontier_distance > 0
+            frontier_dist = getattr(zone.rules, "distance_threshold_km", self.frontier_distance_km) if self.frontier_distance_km > 0 else 0.0
+            frontier_ids = set()
+            if frontier_dist > 0:
+                frontier_ids = find_frontier_cells(
+                    active_cell_ids,
+                    self.cells,
+                    threshold_km=frontier_dist,
+                    neighbor_graph=zone.neighbor_graph or self.global_neighbor_graph
+                )
 
             cells_to_eval: dict[str, Cell] = {}
 
@@ -192,10 +195,19 @@ class ClusterOptimizer:
                     cells_to_eval[fid] = c
 
             # Build neighbor graph: zone specific, or fallback to global filtered
+            # STRICT REQUIREMENT: Only relations where at least one cell belongs to active_cell_ids!
+            # Relations between two outside cells (F1-F2) can NEVER sum to the polygon cost!
             ng = zone.neighbor_graph
             if not ng:
                 if self.global_neighbor_graph:
-                    ng = self.global_neighbor_graph.filter_by_cells(set(cells_to_eval.keys()))
+                    ng = NeighborGraph()
+                    cell_set = set(cells_to_eval.keys())
+                    for relation in self.global_neighbor_graph.all_relations():
+                        ca = relation.cell_a_id
+                        cb = relation.cell_b_id
+                        if ca in cell_set and cb in cell_set:
+                            if ca in active_cell_ids or cb in active_cell_ids:
+                                ng.add_relation(relation)
                 else:
                     ng = NeighborGraph()
 
@@ -223,13 +235,14 @@ class ClusterOptimizer:
                     )
                     self.progress_callback(p)
 
-            # 2. Run FrequencyOptimizer for this zone
+            # 2. Run FrequencyOptimizer for this zone with active_cell_ids scoping
             self._current_optimizer = FrequencyOptimizer(
                 cells=cells_to_eval,
                 neighbor_graph=ng,
                 rules=zone.rules,
                 progress_callback=on_progress,
-                max_workers=self.max_workers
+                max_workers=self.max_workers,
+                active_cell_ids=active_cell_ids
             )
 
             res_list = self._current_optimizer.optimize()
@@ -237,11 +250,53 @@ class ClusterOptimizer:
                 zone.status = "Cancelada"
                 break
 
-            best_plan = res_list.best_plan
-            zone_results[zone.zone_id] = res_list
+            # 3. Rescope results strictly to polygon cells so the score and violations belong only to the polygon
+            from src.engine.cost_function import evaluate_plan
+            zone_cells = {cid: self.cells[cid] for cid in active_cell_ids if cid in self.cells}
+            zone_ng = (zone.neighbor_graph or (self.global_neighbor_graph.filter_by_cells(active_cell_ids) if self.global_neighbor_graph else NeighborGraph()))
+
+            scoped_plans = []
+            for p in res_list:
+                scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in active_cell_ids}
+                scoped_p = evaluate_plan(
+                    assignments=scoped_assigns,
+                    cells=zone_cells,
+                    neighbor_graph=zone_ng,
+                    rules=zone.rules,
+                    plan_id=p.plan_id,
+                    run_id=p.run_id,
+                    collect_violations=True
+                )
+                scoped_plans.append(scoped_p)
+
+            scoped_per_run = {}
+            for r_id, r_plans in getattr(res_list, "per_run", {}).items():
+                scoped_r_plans = []
+                for p in r_plans:
+                    scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in active_cell_ids}
+                    scoped_p = evaluate_plan(
+                        assignments=scoped_assigns,
+                        cells=zone_cells,
+                        neighbor_graph=zone_ng,
+                        rules=zone.rules,
+                        plan_id=p.plan_id,
+                        run_id=p.run_id,
+                        collect_violations=True
+                    )
+                    scoped_r_plans.append(scoped_p)
+                scoped_per_run[r_id] = scoped_r_plans
+
+            final_zone_res = OptimizationResultList(
+                scoped_plans,
+                per_run=scoped_per_run,
+                per_run_history=res_list.per_run_history
+            )
+
+            best_plan = final_zone_res.best_plan
+            zone_results[zone.zone_id] = final_zone_res
             zone.status = "Completada"
 
-            # 3. Consolidate results: update global cells with the new frequencies
+            # 4. Consolidate results: update global cells with the new frequencies
             for assign in best_plan.assignments:
                 if assign.cell_id in active_cell_ids:
                     global_cell = self.cells[assign.cell_id]
@@ -264,7 +319,7 @@ class ClusterOptimizerThread(QThread):
         cells: dict[str, Cell],
         zones: list[OptimizationZone],
         global_neighbor_graph: Optional[NeighborGraph] = None,
-        frontier_distance_km: float = 8.0,
+        frontier_distance_km: float = 0.0,
         max_workers: Optional[int] = None,
         respect_cell_flags: bool = False
     ):
@@ -354,12 +409,15 @@ class ClusterOptimizerThread(QThread):
 
                 zone.status = "Optimizando"
 
-                frontier_ids = find_frontier_cells(
-                    active_cell_ids,
-                    self.optimizer.cells,
-                    threshold_km=getattr(zone.rules, "distance_threshold_km", self.frontier_distance_km),
-                    neighbor_graph=zone.neighbor_graph or self.global_neighbor_graph
-                )
+                frontier_dist = getattr(zone.rules, "distance_threshold_km", self.frontier_distance_km) if self.frontier_distance_km > 0 else 0.0
+                frontier_ids = set()
+                if frontier_dist > 0:
+                    frontier_ids = find_frontier_cells(
+                        active_cell_ids,
+                        self.optimizer.cells,
+                        threshold_km=frontier_dist,
+                        neighbor_graph=zone.neighbor_graph or self.global_neighbor_graph
+                    )
 
                 for fid in frontier_ids:
                     if fid in self.optimizer.cells:
@@ -369,10 +427,19 @@ class ClusterOptimizerThread(QThread):
                         c.new_tch_count = 0
                         cells_to_eval[fid] = c
 
+                # Build neighbor graph: zone specific, or fallback to global filtered
+                # STRICT REQUIREMENT: Only relations where at least one cell belongs to active_cell_ids!
                 ng = zone.neighbor_graph
                 if not ng:
                     if self.global_neighbor_graph:
-                        ng = self.global_neighbor_graph.filter_by_cells(set(cells_to_eval.keys()))
+                        ng = NeighborGraph()
+                        cell_set = set(cells_to_eval.keys())
+                        for relation in self.global_neighbor_graph.all_relations():
+                            ca = relation.cell_a_id
+                            cb = relation.cell_b_id
+                            if ca in cell_set and cb in cell_set:
+                                if ca in active_cell_ids or cb in active_cell_ids:
+                                    ng.add_relation(relation)
                     else:
                         ng = NeighborGraph()
 
@@ -413,7 +480,8 @@ class ClusterOptimizerThread(QThread):
                     neighbor_graph=ng,
                     rules=zone.rules,
                     progress_callback=on_progress,
-                    max_workers=self.max_workers
+                    max_workers=self.max_workers,
+                    active_cell_ids=active_cell_ids
                 )
 
                 res_list = self.optimizer._current_optimizer.optimize()
@@ -421,8 +489,50 @@ class ClusterOptimizerThread(QThread):
                     zone.status = "Cancelada"
                     break
 
-                best_plan = res_list.best_plan
-                zone_results[zone.zone_id] = res_list
+                # Rescope results strictly to polygon cells so the score and violations belong only to the polygon
+                from src.engine.cost_function import evaluate_plan
+                zone_cells = {cid: self.optimizer.cells[cid] for cid in active_cell_ids if cid in self.optimizer.cells}
+                zone_ng = (zone.neighbor_graph or (self.global_neighbor_graph.filter_by_cells(active_cell_ids) if self.global_neighbor_graph else NeighborGraph()))
+
+                scoped_plans = []
+                for p in res_list:
+                    scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in active_cell_ids}
+                    scoped_p = evaluate_plan(
+                        assignments=scoped_assigns,
+                        cells=zone_cells,
+                        neighbor_graph=zone_ng,
+                        rules=zone.rules,
+                        plan_id=p.plan_id,
+                        run_id=p.run_id,
+                        collect_violations=True
+                    )
+                    scoped_plans.append(scoped_p)
+
+                scoped_per_run = {}
+                for r_id, r_plans in getattr(res_list, "per_run", {}).items():
+                    scoped_r_plans = []
+                    for p in r_plans:
+                        scoped_assigns = {a.cell_id: a for a in p.assignments if a.cell_id in active_cell_ids}
+                        scoped_p = evaluate_plan(
+                            assignments=scoped_assigns,
+                            cells=zone_cells,
+                            neighbor_graph=zone_ng,
+                            rules=zone.rules,
+                            plan_id=p.plan_id,
+                            run_id=p.run_id,
+                            collect_violations=True
+                        )
+                        scoped_r_plans.append(scoped_p)
+                    scoped_per_run[r_id] = scoped_r_plans
+
+                final_zone_res = OptimizationResultList(
+                    scoped_plans,
+                    per_run=scoped_per_run,
+                    per_run_history=res_list.per_run_history
+                )
+
+                best_plan = final_zone_res.best_plan
+                zone_results[zone.zone_id] = final_zone_res
                 zone.status = "Completada"
 
                 # Update global cells

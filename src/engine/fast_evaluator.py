@@ -30,11 +30,13 @@ class FastPlanEvaluator:
         cells: dict[str, Cell],
         neighbor_graph: NeighborGraph,
         rules: FrequencyRules,
-        precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None
+        precomputed_close_pairs: Optional[list[tuple[str, str, float]]] = None,
+        active_cell_ids: Optional[set[str]] = None
     ):
         self.cells = cells
         self.neighbor_graph = neighbor_graph
         self.rules = rules
+        self.active_cell_ids = set(active_cell_ids) if active_cell_ids is not None else None
 
         # 1. Map cells to integer indices
         self.cell_ids = sorted(cells.keys())
@@ -65,7 +67,7 @@ class FastPlanEvaluator:
         if rules.enable_distance_penalty:
             if precomputed_close_pairs is None:
                 self.close_pairs_raw = precompute_close_cell_pairs(
-                    cells, neighbor_graph, rules.distance_threshold_km, rules=rules
+                    cells, neighbor_graph, rules.distance_threshold_km, rules=rules, active_cell_ids=self.active_cell_ids
                 )
             else:
                 self.close_pairs_raw = precomputed_close_pairs
@@ -109,6 +111,10 @@ class FastPlanEvaluator:
             cb_id = relation.cell_b_id
             if ca_id not in self.cell_to_idx or cb_id not in self.cell_to_idx:
                 continue
+
+            if self.active_cell_ids is not None:
+                if ca_id not in self.active_cell_ids and cb_id not in self.active_cell_ids:
+                    continue
 
             pair_key = tuple(sorted((ca_id, cb_id)))
             if pair_key in checked_pairs:
@@ -161,6 +167,9 @@ class FastPlanEvaluator:
                     idx_b = idxs[j]
                     ca_id = self.cell_ids[idx_a]
                     cb_id = self.cell_ids[idx_b]
+                    if self.active_cell_ids is not None:
+                        if ca_id not in self.active_cell_ids and cb_id not in self.active_cell_ids:
+                            continue
                     pair_key = tuple(sorted((ca_id, cb_id)))
                     if pair_key in checked_pairs:
                         continue
@@ -177,6 +186,9 @@ class FastPlanEvaluator:
         cp_dp = []
         for ca_id, cb_id, dp in self.close_pairs_raw:
             if ca_id in self.cell_to_idx and cb_id in self.cell_to_idx:
+                if self.active_cell_ids is not None:
+                    if ca_id not in self.active_cell_ids and cb_id not in self.active_cell_ids:
+                        continue
                 cp_a.append(self.cell_to_idx[ca_id])
                 cp_b.append(self.cell_to_idx[cb_id])
                 cp_dp.append(dp)
@@ -278,6 +290,8 @@ class FastPlanEvaluator:
         for i in range(1 + self.max_tch):
             for j in range(i + 1, 1 + self.max_tch):
                 valid_cells = np.where(self.slot_mask[:, i] & self.slot_mask[:, j])[0]
+                if self.active_cell_ids is not None:
+                    valid_cells = np.array([idx for idx in valid_cells if self.cell_ids[idx] in self.active_cell_ids], dtype=np.int32)
                 if len(valid_cells) > 0:
                     self.internal_slot_pairs.append({
                         "i": i,
