@@ -399,27 +399,51 @@ class TestClusterUIEnhancements(unittest.TestCase):
             zones=[zone1, zone2]
         )
 
-        # Main tabs should contain: Global network + Polígono Centro + Polígono Norte
+        # Main tabs should contain: Polígono Centro + Polígono Norte + Red Global Consolidada
         self.assertEqual(widget.results_tabs.count(), 3)
-        self.assertIn("Red Global Consolidada", widget.results_tabs.tabText(0))
-        self.assertIn("Polígono Centro", widget.results_tabs.tabText(1))
-        self.assertIn("Polígono Norte", widget.results_tabs.tabText(2))
+        self.assertIn("Polígono Centro", widget.results_tabs.tabText(0))
+        self.assertIn("Polígono Norte", widget.results_tabs.tabText(1))
+        self.assertIn("Red Global Consolidada", widget.results_tabs.tabText(2))
 
-        # Check sub-tabs inside Red Global Consolidada
-        glob_tab = widget.results_tabs.widget(0)
+        # Default selected tab must be the first polygon (Tab 0)
+        self.assertEqual(widget.results_tabs.currentIndex(), 0)
+
+        # Check sub-tabs inside Polígono Centro (Tab 0)
+        z1_tab = widget.results_tabs.widget(0)
+        self.assertIsInstance(z1_tab, MultiRunViewWidget)
+        self.assertEqual(z1_tab.count(), 4)  # Mejores + Ejec 1 + Ejec 2 + Convergencia
+        self.assertIn("Mejores de Cada Ejecución", z1_tab.tabText(0))
+        self.assertIn("Ejecución 1", z1_tab.tabText(1))
+        self.assertIn("Ejecución 2", z1_tab.tabText(2))
+        self.assertIn("Curvas de Convergencia", z1_tab.tabText(3))
+
+        # Scoped cells check: Polígono Centro assignment table should only list C1
+        z1_run2 = z1_tab.widget(2)
+        z1_run2.summary_table.selectRow(1)
+        self.assertEqual(z1_run2.assign_table.rowCount(), 1)
+        self.assertEqual(z1_run2.assign_table.item(0, 0).text(), "C1")
+
+        # Check sub-tabs inside Polígono Norte (Tab 1)
+        z2_tab = widget.results_tabs.widget(1)
+        self.assertIsInstance(z2_tab, MultiRunViewWidget)
+        self.assertEqual(z2_tab.count(), 4)
+        self.assertIn("Ejecución 1", z2_tab.tabText(1))
+        self.assertIn("Ejecución 2", z2_tab.tabText(2))
+
+        # Scoped cells check: Polígono Norte assignment table should only list C2
+        z2_run2 = z2_tab.widget(2)
+        z2_run2.summary_table.selectRow(1)
+        self.assertEqual(z2_run2.assign_table.rowCount(), 1)
+        self.assertEqual(z2_run2.assign_table.item(0, 0).text(), "C2")
+
+        # Check sub-tabs inside Red Global Consolidada (Tab 2)
+        glob_tab = widget.results_tabs.widget(2)
         self.assertIsInstance(glob_tab, MultiRunViewWidget)
-        self.assertEqual(glob_tab.count(), 4)  # Mejores + Ejec 1 + Ejec 2 + Convergencia
+        self.assertEqual(glob_tab.count(), 4)
         self.assertIn("Mejores de Cada Ejecución", glob_tab.tabText(0))
         self.assertIn("Ejecución 1", glob_tab.tabText(1))
         self.assertIn("Ejecución 2", glob_tab.tabText(2))
         self.assertIn("Curvas de Convergencia", glob_tab.tabText(3))
-
-        # Check sub-tabs inside Polígono Centro
-        z1_tab = widget.results_tabs.widget(1)
-        self.assertIsInstance(z1_tab, MultiRunViewWidget)
-        self.assertEqual(z1_tab.count(), 4)
-        self.assertIn("Ejecución 1", z1_tab.tabText(1))
-        self.assertIn("Ejecución 2", z1_tab.tabText(2))
 
         # Check assignment changes detection: C1 changed from 10 -> 24
         run2_widget = glob_tab.widget(2)

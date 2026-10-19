@@ -480,10 +480,11 @@ class MultiRunViewWidget(QTabWidget):
                 )
         else:
             sorted_res = sorted(results, key=lambda r: r.score)[:5]
+            best = sorted_res[0].score if sorted_res else 0.0
             widget = SingleRunResultWidget()
             widget.load_results(sorted_res, cells, baseline=baseline)
             widget.plan_selected.connect(self.plan_selected.emit)
-            self.addTab(widget, "Resultados (Top 5 Planes)")
+            self.addTab(widget, f"Ejecución 1 (Score: {format_number(best)})")
 
         per_run_history = getattr(results, "per_run_history", {})
         if per_run_history:
@@ -581,17 +582,42 @@ class ResultComparisonWidget(QWidget):
         self.btn_export_html.setEnabled(True)
 
         if zone_results:
-            # 1. Global Consolidated view
-            global_view = MultiRunViewWidget()
-            global_view.populate(results, cells, baseline=baseline)
-            global_view.plan_selected.connect(self.plan_selected.emit)
-            self.results_tabs.addTab(global_view, "🌐 Red Global Consolidada")
-
-            # 2. Per-zone views
+            import copy
             zone_map = {z.zone_id: z for z in zones} if zones else {}
+
+            # 1. Pestaña para cada polígono con sus ejecuciones realizadas
             for z_id, z_res in zone_results.items():
                 zone_obj = zone_map.get(z_id)
                 z_name = zone_obj.name if zone_obj else z_id
+                z_cids = zone_obj.cell_ids if zone_obj else set()
+
+                zone_cells = {cid: cells[cid] for cid in z_cids if cid in cells} if z_cids else cells
+                if not zone_cells:
+                    zone_cells = cells
+
+                # Build scoped baseline plan for this polygon
+                zone_baseline = None
+                if baseline is not None and zone_cells:
+                    try:
+                        from src.engine.cost_function import evaluate_plan
+                        from src.models.frequency_plan import FrequencyAssignment
+                        from src.models.neighbor import NeighborGraph
+                        z_base_assigns = {
+                            cid: FrequencyAssignment(cid, c.bcch or 0, list(c.tch_list))
+                            for cid, c in zone_cells.items()
+                        }
+                        z_ng = neighbor_graph.filter_by_cells(set(zone_cells.keys())) if neighbor_graph else NeighborGraph()
+                        zone_baseline = evaluate_plan(
+                            assignments=z_base_assigns,
+                            cells=zone_cells,
+                            neighbor_graph=z_ng,
+                            rules=getattr(zone_obj, "rules", rules) or rules,
+                            plan_id=0,
+                            run_id=0,
+                            collect_violations=True
+                        )
+                    except Exception:
+                        zone_baseline = baseline
 
                 from src.models.frequency_plan import OptimizationResultList
                 if not isinstance(z_res, OptimizationResultList):
@@ -602,13 +628,43 @@ class ResultComparisonWidget(QWidget):
                 else:
                     z_res_obj = z_res
 
+                # Scope plan assignments to zone cells if polygon cells are defined
+                if z_cids:
+                    scoped_plans = []
+                    for p in z_res_obj:
+                        p_copy = copy.copy(p)
+                        p_copy.assignments = [a for a in p.assignments if a.cell_id in z_cids]
+                        scoped_plans.append(p_copy)
+                    scoped_per_run = {}
+                    for r_id, r_plans in getattr(z_res_obj, "per_run", {}).items():
+                        scoped_r_plans = []
+                        for p in r_plans:
+                            p_copy = copy.copy(p)
+                            p_copy.assignments = [a for a in p.assignments if a.cell_id in z_cids]
+                            scoped_r_plans.append(p_copy)
+                        scoped_per_run[r_id] = scoped_r_plans
+                    z_res_scoped = OptimizationResultList(
+                        scoped_plans,
+                        per_run=scoped_per_run,
+                        per_run_history=z_res_obj.per_run_history
+                    )
+                else:
+                    z_res_scoped = z_res_obj
+
                 zone_view = MultiRunViewWidget()
-                zone_view.populate(z_res_obj, cells, baseline=baseline)
+                zone_view.populate(z_res_scoped, zone_cells, baseline=zone_baseline)
                 zone_view.plan_selected.connect(self.plan_selected.emit)
 
-                n_runs = len(getattr(z_res_obj, "per_run", {}))
-                runs_suffix = f" ({n_runs} ejecuciones)" if n_runs > 1 else ""
-                self.results_tabs.addTab(zone_view, f"📍 {z_name}{runs_suffix}")
+                self.results_tabs.addTab(zone_view, f"📍 {z_name}")
+
+            # 2. Red Global Consolidada al final
+            global_view = MultiRunViewWidget()
+            global_view.populate(results, cells, baseline=baseline)
+            global_view.plan_selected.connect(self.plan_selected.emit)
+            self.results_tabs.addTab(global_view, "🌐 Red Global Consolidada")
+
+            # Seleccionar por defecto la pestaña del primer polígono
+            self.results_tabs.setCurrentIndex(0)
 
             best_sc = results[0].score if results else 0.0
             num_runs = len(getattr(results, "per_run", {}))
