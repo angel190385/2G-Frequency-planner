@@ -434,6 +434,64 @@ class ConvergenceTabWidget(QWidget):
         canvas.draw_idle()
 
 
+class MultiRunViewWidget(QTabWidget):
+    """Sub-tab container displaying multi-run plans and convergence curves for a result set."""
+
+    plan_selected = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def populate(
+        self,
+        results: list[PlanResult],
+        cells: dict[str, Cell],
+        baseline: Optional[PlanResult] = None
+    ):
+        self.clear()
+        if not results:
+            return
+
+        per_run = getattr(results, "per_run", {})
+        num_runs = len(per_run)
+
+        if num_runs > 1:
+            best_of_each_run = []
+            for run_idx in sorted(per_run.keys()):
+                run_res = per_run[run_idx]
+                if run_res:
+                    best_run_plan = min(run_res, key=lambda r: r.score)
+                    best_of_each_run.append(best_run_plan)
+
+            best_widget = SingleRunResultWidget()
+            best_widget.load_results(best_of_each_run, cells, baseline=baseline)
+            best_widget.plan_selected.connect(self.plan_selected.emit)
+            self.addTab(best_widget, "🏆 Mejores de Cada Ejecución")
+
+            for run_idx in sorted(per_run.keys()):
+                run_res = per_run[run_idx]
+                sorted_run_res = sorted(run_res, key=lambda r: r.score)[:5]
+                best = sorted_run_res[0].score if sorted_run_res else 0.0
+                widget = SingleRunResultWidget()
+                widget.load_results(sorted_run_res, cells, baseline=baseline)
+                widget.plan_selected.connect(self.plan_selected.emit)
+                self.addTab(
+                    widget, f"Ejecución {run_idx} (Top 5 - Score: {format_number(best)})"
+                )
+        else:
+            sorted_res = sorted(results, key=lambda r: r.score)[:5]
+            widget = SingleRunResultWidget()
+            widget.load_results(sorted_res, cells, baseline=baseline)
+            widget.plan_selected.connect(self.plan_selected.emit)
+            self.addTab(widget, "Resultados (Top 5 Planes)")
+
+        per_run_history = getattr(results, "per_run_history", {})
+        if per_run_history:
+            self.addTab(
+                ConvergenceTabWidget(per_run_history), "📈 Curvas de Convergencia"
+            )
+
+
 class ResultComparisonWidget(QWidget):
     """Main results comparison widget supporting multi-execution sub-tabs."""
 
@@ -498,9 +556,11 @@ class ResultComparisonWidget(QWidget):
         cells: dict[str, Cell],
         neighbor_graph: Optional[object] = None,
         rules: Optional[object] = None,
-        baseline: Optional[PlanResult] = None
+        baseline: Optional[PlanResult] = None,
+        zone_results: Optional[dict[str, object]] = None,
+        zones: Optional[list[object]] = None
     ):
-        """Load results and generate sub-tabs for multi-run results."""
+        """Load results and generate sub-tabs for multi-run and per-polygon results."""
         self._results = results
         self._cells = cells
 
@@ -520,51 +580,86 @@ class ResultComparisonWidget(QWidget):
         self.btn_export.setEnabled(True)
         self.btn_export_html.setEnabled(True)
 
-        per_run = getattr(results, "per_run", {})
-        num_runs = len(per_run)
+        if zone_results:
+            # 1. Global Consolidated view
+            global_view = MultiRunViewWidget()
+            global_view.populate(results, cells, baseline=baseline)
+            global_view.plan_selected.connect(self.plan_selected.emit)
+            self.results_tabs.addTab(global_view, "🌐 Red Global Consolidada")
 
-        if num_runs > 1:
+            # 2. Per-zone views
+            zone_map = {z.zone_id: z for z in zones} if zones else {}
+            for z_id, z_res in zone_results.items():
+                zone_obj = zone_map.get(z_id)
+                z_name = zone_obj.name if zone_obj else z_id
+
+                from src.models.frequency_plan import OptimizationResultList
+                if not isinstance(z_res, OptimizationResultList):
+                    z_plans = list(z_res) if isinstance(z_res, list) else ([z_res] if z_res else [])
+                    z_per_run = getattr(z_res, "per_run", {})
+                    z_per_run_hist = getattr(z_res, "per_run_history", {})
+                    z_res_obj = OptimizationResultList(z_plans, per_run=z_per_run, per_run_history=z_per_run_hist)
+                else:
+                    z_res_obj = z_res
+
+                zone_view = MultiRunViewWidget()
+                zone_view.populate(z_res_obj, cells, baseline=baseline)
+                zone_view.plan_selected.connect(self.plan_selected.emit)
+
+                n_runs = len(getattr(z_res_obj, "per_run", {}))
+                runs_suffix = f" ({n_runs} ejecuciones)" if n_runs > 1 else ""
+                self.results_tabs.addTab(zone_view, f"📍 {z_name}{runs_suffix}")
+
+            best_sc = results[0].score if results else 0.0
+            num_runs = len(getattr(results, "per_run", {}))
             self.lbl_status.setText(
-                f"{len(results)} mejores opciones ({num_runs} ejecuciones realizadas)"
+                f"Optimización por Zonas completada ({len(zone_results)} zonas, {num_runs} ejecuciones) — Mejor score: {format_number(best_sc)}"
             )
-
-            # Master Tab: Best plan of each distinct execution
-            best_of_each_run = []
-            for run_idx in sorted(per_run.keys()):
-                run_res = per_run[run_idx]
-                if run_res:
-                    best_run_plan = min(run_res, key=lambda r: r.score)
-                    best_of_each_run.append(best_run_plan)
-
-            best_widget = SingleRunResultWidget()
-            best_widget.load_results(best_of_each_run, cells, baseline=baseline)
-            best_widget.plan_selected.connect(self.plan_selected.emit)
-            self.results_tabs.addTab(best_widget, "🏆 Mejores de Cada Ejecución")
-
-            # Individual Run Tabs: top 5 plans of each run
-            for run_idx in sorted(per_run.keys()):
-                run_res = per_run[run_idx]
-                sorted_run_res = sorted(run_res, key=lambda r: r.score)[:5]
-                best = sorted_run_res[0].score if sorted_run_res else 0.0
-                widget = SingleRunResultWidget()
-                widget.load_results(sorted_run_res, cells, baseline=baseline)
-                widget.plan_selected.connect(self.plan_selected.emit)
-                self.results_tabs.addTab(
-                    widget, f"Ejecución {run_idx} (Top 5 - Score: {format_number(best)})"
-                )
         else:
-            sorted_res = sorted(results, key=lambda r: r.score)[:5]
-            best = sorted_res[0].score if sorted_res else 0.0
-            self.lbl_status.setText(f"Top 5 planes calculados — Mejor score: {format_number(best)}")
+            # Standard single/monolithic optimization view
+            per_run = getattr(results, "per_run", {})
+            num_runs = len(per_run)
 
-            widget = SingleRunResultWidget()
-            widget.load_results(sorted_res, cells, baseline=baseline)
-            widget.plan_selected.connect(self.plan_selected.emit)
-            self.results_tabs.addTab(widget, "Resultados (Top 5 Planes)")
+            if num_runs > 1:
+                self.lbl_status.setText(
+                    f"{len(results)} mejores opciones ({num_runs} ejecuciones realizadas)"
+                )
 
-        # Convergence history tab
-        per_run_history = getattr(results, "per_run_history", {})
-        if per_run_history:
-            self.results_tabs.addTab(
-                ConvergenceTabWidget(per_run_history), "📈 Curvas de Convergencia"
-            )
+                best_of_each_run = []
+                for run_idx in sorted(per_run.keys()):
+                    run_res = per_run[run_idx]
+                    if run_res:
+                        best_run_plan = min(run_res, key=lambda r: r.score)
+                        best_of_each_run.append(best_run_plan)
+
+                best_widget = SingleRunResultWidget()
+                best_widget.load_results(best_of_each_run, cells, baseline=baseline)
+                best_widget.plan_selected.connect(self.plan_selected.emit)
+                self.results_tabs.addTab(best_widget, "🏆 Mejores de Cada Ejecución")
+
+                for run_idx in sorted(per_run.keys()):
+                    run_res = per_run[run_idx]
+                    sorted_run_res = sorted(run_res, key=lambda r: r.score)[:5]
+                    best = sorted_run_res[0].score if sorted_run_res else 0.0
+                    widget = SingleRunResultWidget()
+                    widget.load_results(sorted_run_res, cells, baseline=baseline)
+                    widget.plan_selected.connect(self.plan_selected.emit)
+                    self.results_tabs.addTab(
+                        widget, f"Ejecución {run_idx} (Top 5 - Score: {format_number(best)})"
+                    )
+            else:
+                sorted_res = sorted(results, key=lambda r: r.score)[:5]
+                best = sorted_res[0].score if sorted_res else 0.0
+                self.lbl_status.setText(f"Top 5 planes calculados — Mejor score: {format_number(best)}")
+
+                widget = SingleRunResultWidget()
+                widget.load_results(sorted_res, cells, baseline=baseline)
+                widget.plan_selected.connect(self.plan_selected.emit)
+                self.results_tabs.addTab(widget, "Resultados (Top 5 Planes)")
+
+            per_run_history = getattr(results, "per_run_history", {})
+            if per_run_history:
+                self.results_tabs.addTab(
+                    ConvergenceTabWidget(per_run_history), "📈 Curvas de Convergencia"
+                )
+

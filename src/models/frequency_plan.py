@@ -175,3 +175,23 @@ class OptimizationResultList(list):
         """Return the overall best plan (first item) or None if list is empty."""
         return self[0] if len(self) > 0 else None
 
+    @property
+    def score(self) -> float:
+        return self[0].score if len(self) > 0 else 0.0
+
+    @property
+    def assignments(self) -> list[FrequencyAssignment]:
+        return self[0].assignments if len(self) > 0 else []
+
+    @property
+    def violations(self) -> list[Violation]:
+        return self[0].violations if len(self) > 0 else []
+
+    @property
+    def critical_violations(self) -> int:
+        return self[0].critical_violations if len(self) > 0 else 0
+
+    @property
+    def total_violations(self) -> int:
+        return self[0].total_violations if len(self) > 0 else 0
+

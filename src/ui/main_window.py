@@ -878,42 +878,139 @@ class MainWindow(QMainWindow):
 
     def _on_cluster_optimization_completed(self, zone_results: dict, updated_cells: dict):
         """Handle completion of sequential cluster/zone optimization."""
+        import copy
+        from src.engine.cost_function import evaluate_plan
+        from src.models.frequency_plan import FrequencyAssignment, OptimizationResultList
+        from src.io.html_exporter import generate_baseline_plan
+        from src.io.auto_export import export_execution_bundle
+
+        # 1. Preserve original cells as baseline before updating self.cells
+        baseline_cells = getattr(self, "_baseline_cells", None)
+        if not baseline_cells:
+            baseline_cells = copy.deepcopy(self.cells)
+
+        baseline_plan = generate_baseline_plan(baseline_cells, self.neighbor_graph, self.rules)
+
+        # 2. Update network cells with newly calculated frequencies
         self.cells = updated_cells
         self.cell_table.load_cells(self.cells)
         self._refresh_calc_table()
 
-        # Evaluate the consolidated global plan
-        from src.engine.cost_function import evaluate_plan
-        from src.models.frequency_plan import FrequencyAssignment, OptimizationResultList
-        from src.io.auto_export import export_execution_bundle
+        # 3. Determine active zones and all run IDs across all zones
+        active_zones = getattr(self, "_last_active_zones", None)
+        if not active_zones and hasattr(self, "zone_map_widget"):
+            active_zones = [z for z in self.zone_map_widget.zones if z.zone_id in zone_results]
+        if not active_zones:
+            active_zones = list(self.zone_map_widget.zones) if hasattr(self, "zone_map_widget") else []
 
-        assignments = {}
+        all_run_ids = set()
+        for z_id, z_res in zone_results.items():
+            if hasattr(z_res, "per_run") and z_res.per_run:
+                all_run_ids.update(z_res.per_run.keys())
+
+        if not all_run_ids:
+            all_run_ids = {1}
+
+        sorted_run_ids = sorted(all_run_ids)
+        per_run = {}
+        per_run_history = {}
+
+        # Evaluate the absolute best combination across all zones (from updated_cells)
+        best_assignments = {}
         for cid, cell in self.cells.items():
-            assignments[cid] = FrequencyAssignment(
+            best_assignments[cid] = FrequencyAssignment(
                 cell_id=cid,
                 bcch=cell.bcch or 0,
                 tch_list=list(cell.tch_list)
             )
 
-        consolidated_plan = evaluate_plan(
-            assignments=assignments,
-            cells=self.cells,
+        best_consolidated_plan = evaluate_plan(
+            assignments=best_assignments,
+            cells=baseline_cells,
             neighbor_graph=self.neighbor_graph,
             rules=self.rules,
             plan_id=1,
-            run_id=1
+            run_id=1,
+            collect_violations=True
         )
 
-        res_list = OptimizationResultList([consolidated_plan], per_run={1: [consolidated_plan]})
+        for r in sorted_run_ids:
+            run_assignments = {}
+            for cid, cell in baseline_cells.items():
+                run_assignments[cid] = FrequencyAssignment(
+                    cell_id=cid,
+                    bcch=cell.bcch or 0,
+                    tch_list=list(cell.tch_list)
+                )
+
+            for z in active_zones:
+                z_res = zone_results.get(z.zone_id)
+                if not z_res:
+                    continue
+                plans_in_r = getattr(z_res, "per_run", {}).get(r, []) if hasattr(z_res, "per_run") else []
+                if plans_in_r:
+                    best_p = min(plans_in_r, key=lambda p: p.score)
+                else:
+                    best_p = getattr(z_res, "best_plan", z_res[0] if isinstance(z_res, list) and z_res else None)
+
+                if best_p:
+                    for assign in best_p.assignments:
+                        if assign.cell_id in z.cell_ids:
+                            run_assignments[assign.cell_id] = copy.deepcopy(assign)
+
+            plan_r = evaluate_plan(
+                assignments=run_assignments,
+                cells=baseline_cells,
+                neighbor_graph=self.neighbor_graph,
+                rules=self.rules,
+                plan_id=r,
+                run_id=r,
+                collect_violations=True
+            )
+            per_run[r] = [plan_r]
+
+            # Aggregate per_run_history across zones for run r
+            hist_r = []
+            gen_offset = 0
+            for z in active_zones:
+                z_res = zone_results.get(z.zone_id)
+                if z_res and hasattr(z_res, "per_run_history"):
+                    z_hist = z_res.per_run_history.get(r, [])
+                    if z_hist:
+                        for gen_num, score in z_hist:
+                            hist_r.append((gen_offset + gen_num, score))
+                        gen_offset += max(h[0] for h in z_hist)
+            if hist_r:
+                per_run_history[r] = hist_r
+
+        seen_scores = set()
+        all_plans = []
+        for p in [best_consolidated_plan] + [per_run[r][0] for r in sorted_run_ids]:
+            sc_key = round(p.score, 4)
+            if sc_key not in seen_scores:
+                seen_scores.add(sc_key)
+                all_plans.append(p)
+        all_plans.sort(key=lambda p: p.score)
+
+        res_list = OptimizationResultList(all_plans, per_run=per_run, per_run_history=per_run_history)
         self.results = res_list
-        self.result_widget.load_results(res_list, self.cells, self.neighbor_graph, self.rules)
-        self.zone_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-        self.result_map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
-        self.tabs.setCurrentWidget(self.result_map_widget)
+
+        self.result_widget.load_results(
+            res_list,
+            baseline_cells,
+            self.neighbor_graph,
+            self.rules,
+            baseline=baseline_plan,
+            zone_results=zone_results,
+            zones=active_zones
+        )
+        self.zone_map_widget.load_data(baseline_cells, self.results, self.neighbor_graph, self.rules)
+        self.result_map_widget.load_data(baseline_cells, self.results, self.neighbor_graph, self.rules)
+        self.tabs.setCurrentWidget(self.result_widget)
 
         try:
             export_execution_bundle(
-                cells=self.cells,
+                cells=baseline_cells,
                 neighbor_graph=self.neighbor_graph,
                 rules=self.rules,
                 results=res_list
@@ -1114,6 +1211,9 @@ class MainWindow(QMainWindow):
             max_workers = workers.value() if workers else None
             frontier_dist = self.zone_map_widget.spin_frontier.value() if hasattr(self.zone_map_widget, "spin_frontier") else 8.0
 
+            self._baseline_cells = copy.deepcopy(self.cells)
+            self._last_active_zones = active_zones
+
             self.btn_calculate.setEnabled(False)
             self._calc_start_time = datetime.now()
             self.lbl_progress.setText(f"⏳ Optimizando secuencialmente ({len(active_zones)} zonas, {runs} ejecuciones)...")
@@ -1139,6 +1239,9 @@ class MainWindow(QMainWindow):
             return
 
         # Monolithic global optimization
+        self._baseline_cells = copy.deepcopy(self.cells)
+        self._last_active_zones = []
+
         self.btn_calculate.setEnabled(False)
         self._calc_start_time = datetime.now()
         self.lbl_progress.setText(f"⏳ Optimizando ({self.rules.num_runs} ejecuciones en paralelo)...")

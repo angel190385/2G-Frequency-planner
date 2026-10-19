@@ -238,7 +238,7 @@ class ClusterOptimizer:
                 break
 
             best_plan = res_list.best_plan
-            zone_results[zone.zone_id] = best_plan
+            zone_results[zone.zone_id] = res_list
             zone.status = "Completada"
 
             # 3. Consolidate results: update global cells with the new frequencies
@@ -422,7 +422,7 @@ class ClusterOptimizerThread(QThread):
                     break
 
                 best_plan = res_list.best_plan
-                zone_results[zone.zone_id] = best_plan
+                zone_results[zone.zone_id] = res_list
                 zone.status = "Completada"
 
                 # Update global cells

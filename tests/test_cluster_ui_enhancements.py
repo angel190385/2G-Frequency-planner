@@ -315,6 +315,93 @@ class TestClusterUIEnhancements(unittest.TestCase):
 
         win.close()
 
+    def test_sequential_results_multi_run_tabs(self):
+        """Test that ResultComparisonWidget creates per-polygon tabs and multi-run tabs."""
+        from src.ui.widgets.result_comparison import ResultComparisonWidget, MultiRunViewWidget
+        from src.models.frequency_plan import PlanResult, FrequencyAssignment, OptimizationResultList
+        from src.models.zone import OptimizationZone
+
+        widget = ResultComparisonWidget()
+        st = Station("ST1", "Emplazamiento 1", 40.4, -3.7)
+        c1 = Cell("C1", st, 1, bcch=10, tch_list=[12])
+        c2 = Cell("C2", st, 2, bcch=14, tch_list=[16])
+        cells = {"C1": c1, "C2": c2}
+
+        # Plans for Zone 1: 2 runs
+        z1_p_r1 = PlanResult(plan_id=1, run_id=1, assignments=[FrequencyAssignment("C1", 20, [22])], score=100.0)
+        z1_p_r2 = PlanResult(plan_id=2, run_id=2, assignments=[FrequencyAssignment("C1", 24, [26])], score=90.0)
+        z1_res = OptimizationResultList(
+            [z1_p_r2, z1_p_r1],
+            per_run={1: [z1_p_r1], 2: [z1_p_r2]},
+            per_run_history={1: [(1, 120.0), (2, 100.0)], 2: [(1, 110.0), (2, 90.0)]}
+        )
+
+        # Plans for Zone 2: 2 runs
+        z2_p_r1 = PlanResult(plan_id=3, run_id=1, assignments=[FrequencyAssignment("C2", 30, [32])], score=80.0)
+        z2_p_r2 = PlanResult(plan_id=4, run_id=2, assignments=[FrequencyAssignment("C2", 34, [36])], score=70.0)
+        z2_res = OptimizationResultList(
+            [z2_p_r2, z2_p_r1],
+            per_run={1: [z2_p_r1], 2: [z2_p_r2]},
+            per_run_history={1: [(1, 95.0), (2, 80.0)], 2: [(1, 85.0), (2, 70.0)]}
+        )
+
+        zone1 = OptimizationZone("z1", "Polígono Centro", polygon_coords=[], cell_ids={"C1"})
+        zone2 = OptimizationZone("z2", "Polígono Norte", polygon_coords=[], cell_ids={"C2"})
+
+        # Consolidated global results across the 2 runs
+        glob_r1 = PlanResult(plan_id=1, run_id=1, assignments=[FrequencyAssignment("C1", 20, [22]), FrequencyAssignment("C2", 30, [32])], score=180.0)
+        glob_r2 = PlanResult(plan_id=2, run_id=2, assignments=[FrequencyAssignment("C1", 24, [26]), FrequencyAssignment("C2", 34, [36])], score=160.0)
+        glob_res = OptimizationResultList(
+            [glob_r2, glob_r1],
+            per_run={1: [glob_r1], 2: [glob_r2]},
+            per_run_history={1: [(1, 120.0), (2, 100.0)], 2: [(1, 110.0), (2, 90.0)]}
+        )
+
+        base_plan = PlanResult(plan_id=0, run_id=0, assignments=[FrequencyAssignment("C1", 10, [12]), FrequencyAssignment("C2", 14, [16])], score=500.0)
+
+        widget.load_results(
+            results=glob_res,
+            cells=cells,
+            baseline=base_plan,
+            zone_results={"z1": z1_res, "z2": z2_res},
+            zones=[zone1, zone2]
+        )
+
+        # Main tabs should contain: Global network + Polígono Centro + Polígono Norte
+        self.assertEqual(widget.results_tabs.count(), 3)
+        self.assertIn("Red Global Consolidada", widget.results_tabs.tabText(0))
+        self.assertIn("Polígono Centro", widget.results_tabs.tabText(1))
+        self.assertIn("Polígono Norte", widget.results_tabs.tabText(2))
+
+        # Check sub-tabs inside Red Global Consolidada
+        glob_tab = widget.results_tabs.widget(0)
+        self.assertIsInstance(glob_tab, MultiRunViewWidget)
+        self.assertEqual(glob_tab.count(), 4)  # Mejores + Ejec 1 + Ejec 2 + Convergencia
+        self.assertIn("Mejores de Cada Ejecución", glob_tab.tabText(0))
+        self.assertIn("Ejecución 1", glob_tab.tabText(1))
+        self.assertIn("Ejecución 2", glob_tab.tabText(2))
+        self.assertIn("Curvas de Convergencia", glob_tab.tabText(3))
+
+        # Check sub-tabs inside Polígono Centro
+        z1_tab = widget.results_tabs.widget(1)
+        self.assertIsInstance(z1_tab, MultiRunViewWidget)
+        self.assertEqual(z1_tab.count(), 4)
+        self.assertIn("Ejecución 1", z1_tab.tabText(1))
+        self.assertIn("Ejecución 2", z1_tab.tabText(2))
+
+        # Check assignment changes detection: C1 changed from 10 -> 24
+        run2_widget = glob_tab.widget(2)
+        # Row 0 is baseline plan ("— (Línea Base)"). Row 1 is the calculated plan:
+        run2_widget.summary_table.selectRow(1)
+        table = run2_widget.assign_table
+        # Column 5 is "Cambio"
+        status_item = table.item(0, 5)
+        self.assertIsNotNone(status_item)
+        self.assertEqual(status_item.text(), "✓ Cambiado")
+
+        widget.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+
