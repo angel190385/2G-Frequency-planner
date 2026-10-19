@@ -595,6 +595,12 @@ class MainWindow(QMainWindow):
         self.calc_table.setColumnWidth(self.COL_NEW_TCH, 80)
 
         self.calc_table.blockSignals(False)
+        has_zones = hasattr(self, "zone_map_widget") and bool(self.zone_map_widget.zones)
+        if hasattr(self, "chk_sequential_zones"):
+            self.chk_sequential_zones.setEnabled(has_zones)
+            if not has_zones:
+                self.chk_sequential_zones.setChecked(False)
+        self._update_calc_button_text()
         self._on_calc_selection_changed()
 
     _update_calc_table = _refresh_calc_table
@@ -898,14 +904,22 @@ class MainWindow(QMainWindow):
 
     def _on_zone_selection_applied(self):
         """Called when polygon zones selection is applied to the Calculation table."""
-        self._zones_applied_to_calc = True
-        if hasattr(self, "chk_sequential_zones"):
-            self.chk_sequential_zones.setChecked(True)
+        has_zones = hasattr(self, "zone_map_widget") and bool(self.zone_map_widget.zones)
+        if has_zones:
+            self._zones_applied_to_calc = True
+            if hasattr(self, "chk_sequential_zones"):
+                self.chk_sequential_zones.setChecked(True)
+            self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo secuencial")
+        else:
+            self._zones_applied_to_calc = False
+            if hasattr(self, "chk_sequential_zones"):
+                self.chk_sequential_zones.setChecked(False)
+            self.status_label.setText("Sin zonas dibujadas — Se ejecutará en una sola optimización global")
+
         self._update_calc_button_text()
         self._refresh_calc_table()
-        # Switch to calculation tab
+        # Switch to calculation tab immediately
         self.tabs.setCurrentWidget(self.calc_tab_widget)
-        self.status_label.setText("Celdas seleccionadas desde los polígonos del mapa para recálculo secuencial")
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""

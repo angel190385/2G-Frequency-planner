@@ -181,6 +181,37 @@ class TestClusterUIEnhancements(unittest.TestCase):
 
         win.close()
 
+    def test_apply_to_calc_switches_tab_and_configures_mode(self):
+        """Test that clicking Apply to Calc switches to Calculation tab and handles zones vs no-zones."""
+        win = MainWindow()
+        st = Station("ST1", "Emplazamiento 1", 40.4, -3.7)
+        c1 = Cell("C1", st, 1, bcch=10, tch_list=[12, 14])
+        win.cells = {"C1": c1}
+        win.zone_map_widget.cells = win.cells
+
+        # Case 1: No zones painted -> applies, opens calculation tab, single optimization mode
+        win.tabs.setCurrentWidget(win.zone_map_widget)
+        win.zone_map_widget._apply_zones_to_calc_table()
+        self.assertEqual(win.tabs.currentWidget(), win.calc_tab_widget)
+        self.assertFalse(win.chk_sequential_zones.isChecked())
+        self.assertEqual(win.btn_calculate.text(), "🚀 CALCULAR FRECUENCIAS")
+
+        # Case 2: Zones painted -> applies, opens calculation tab, sequential mode activated
+        z = OptimizationZone(
+            zone_id="z_test",
+            name="Zona Test",
+            polygon_coords=[(40.0, -3.0), (40.1, -3.0), (40.1, -3.1)],
+            cell_ids={"C1"}
+        )
+        win.zone_map_widget.zones = [z]
+        win.tabs.setCurrentWidget(win.zone_map_widget)
+        win.zone_map_widget._apply_zones_to_calc_table()
+        self.assertEqual(win.tabs.currentWidget(), win.calc_tab_widget)
+        self.assertTrue(win.chk_sequential_zones.isChecked())
+        self.assertEqual(win.btn_calculate.text(), "🚀 CALCULAR FRECUENCIAS (Secuencial)")
+
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

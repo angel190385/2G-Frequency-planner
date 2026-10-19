@@ -305,25 +305,9 @@ class MapWidget(QWidget):
         layout.addWidget(cfg_box)
 
         # Apply selection to Calculation tab button
-        self.btn_apply_to_calc = QPushButton("☑️ Aplicar Selección a Tabla de Cálculo")
-        self.btn_apply_to_calc.setToolTip("Aplica las celdas de estos polígonos como celdas a recalcular en la pestaña 'Cálculo'")
+        self.btn_apply_to_calc = QPushButton("☑️ Aplicar a Tabla de Cálculo")
+        self.btn_apply_to_calc.setToolTip("Aplica la selección de las zonas a la tabla y abre la pestaña 'Cálculo'")
         self.btn_apply_to_calc.setStyleSheet("""
-            QPushButton {
-                background-color: #1e293b;
-                color: #38bdf8;
-                border: 1px solid #38bdf8;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 7px;
-            }
-            QPushButton:hover { background-color: #38bdf8; color: #0f172a; }
-        """)
-        self.btn_apply_to_calc.clicked.connect(self._apply_zones_to_calc_table)
-        layout.addWidget(self.btn_apply_to_calc)
-
-        # Sequential run button
-        self.btn_run_sequential = QPushButton("🚀 Ejecutar Optimización Secuencial")
-        self.btn_run_sequential.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00d4aa, stop:1 #00b894);
                 color: #0f172a;
@@ -335,13 +319,9 @@ class MapWidget(QWidget):
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38ef7d, stop:1 #11998e);
             }
-            QPushButton:disabled {
-                background: #334155;
-                color: #64748b;
-            }
         """)
-        self.btn_run_sequential.clicked.connect(self._run_cluster_optimization)
-        layout.addWidget(self.btn_run_sequential)
+        self.btn_apply_to_calc.clicked.connect(self._apply_zones_to_calc_table)
+        layout.addWidget(self.btn_apply_to_calc)
 
         return panel
 
@@ -966,14 +946,11 @@ class MapWidget(QWidget):
         self._refresh_map()
 
     def _apply_zones_to_calc_table(self):
-        """Apply the cells of the defined zones to the main Calculation table."""
-        if not self.zones:
-            QMessageBox.warning(self, "Sin zonas", "Debes trazar al menos un polígono de zona en el mapa.")
-            return
-
-        total_cells_in_zones = sum(z.cell_count for z in self.zones)
-        if total_cells_in_zones == 0:
-            QMessageBox.warning(self, "Zonas vacías", "Ninguna de las zonas definidas contiene celdas.")
+        """Apply the cells of the defined zones to the main Calculation table and open Calculation tab."""
+        if not self.zones or sum(z.cell_count for z in self.zones) == 0:
+            # No zones painted: clear sequential selection flag and open Calculation tab for single optimization
+            self._selection_applied_to_calc = False
+            self.zone_selection_applied.emit()
             return
 
         # Reset all cells
@@ -998,11 +975,6 @@ class MapWidget(QWidget):
 
         self._selection_applied_to_calc = True
         self.zone_selection_applied.emit()
-        QMessageBox.information(
-            self, "Selección Aplicada a Cálculo",
-            f"Se han seleccionado {selected_count} celdas correspondientes a las zonas definidas.\n"
-            "La tabla de la pestaña 'Cálculo' se ha actualizado con este subconjunto."
-        )
 
     def _on_runs_changed(self, val: int):
         """Update default runs count across existing zones."""
@@ -1021,7 +993,8 @@ class MapWidget(QWidget):
             QMessageBox.warning(self, "Zonas vacías", "Ninguna de las zonas definidas contiene celdas.")
             return
 
-        self.btn_run_sequential.setEnabled(False)
+        if hasattr(self, "btn_run_sequential"):
+            self.btn_run_sequential.setEnabled(False)
 
         # Open progress dialog
         self.cluster_dialog = ClusterProgressDialog(total_zones=len(self.zones), parent=self)
@@ -1057,7 +1030,8 @@ class MapWidget(QWidget):
 
     def _on_cluster_finished(self, zone_results: dict, updated_cells: dict):
         """Handle cluster optimization completion."""
-        self.btn_run_sequential.setEnabled(True)
+        if hasattr(self, "btn_run_sequential"):
+            self.btn_run_sequential.setEnabled(True)
         if self.cluster_dialog:
             self.cluster_dialog.accept()
 
@@ -1073,7 +1047,8 @@ class MapWidget(QWidget):
 
     def _on_cluster_error(self, err_msg: str):
         """Handle error during cluster optimization."""
-        self.btn_run_sequential.setEnabled(True)
+        if hasattr(self, "btn_run_sequential"):
+            self.btn_run_sequential.setEnabled(True)
         if self.cluster_dialog:
             self.cluster_dialog.reject()
         QMessageBox.critical(self, "Error de Optimización", f"Ocurrió un error:\n{err_msg}")
