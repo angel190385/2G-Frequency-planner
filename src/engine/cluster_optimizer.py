@@ -176,16 +176,25 @@ class ClusterOptimizer:
                     ng = NeighborGraph()
 
             # Define progress relay
-            def on_progress(current_run: int, current_gen: int, best_score: float):
+            def on_progress(*args):
+                if len(args) == 5:
+                    run_idx, total_runs, gen, total_gens, best_score = args
+                elif len(args) == 3:
+                    gen, total_gens, best_score = args
+                    run_idx = 1
+                    total_runs = zone.rules.num_runs
+                else:
+                    return
+
                 if self.progress_callback:
                     p = ZoneOptimizationProgress(
                         zone_index=z_idx,
                         total_zones=total_zones,
                         zone_name=zone.name,
-                        current_run=current_run,
-                        total_runs=zone.rules.num_runs,
-                        current_gen=current_gen,
-                        total_gens=zone.rules.num_generations,
+                        current_run=run_idx,
+                        total_runs=total_runs,
+                        current_gen=gen,
+                        total_gens=total_gens,
                         best_score=best_score
                     )
                     self.progress_callback(p)
@@ -304,15 +313,24 @@ class ClusterOptimizerThread(QThread):
                     else:
                         ng = NeighborGraph()
 
-                def on_progress(current_run: int, current_gen: int, best_score: float):
+                def on_progress(*args):
+                    if len(args) == 5:
+                        run_idx, total_runs, gen, total_gens, best_score = args
+                    elif len(args) == 3:
+                        gen, total_gens, best_score = args
+                        run_idx = 1
+                        total_runs = zone.rules.num_runs
+                    else:
+                        return
+
                     p = ZoneOptimizationProgress(
                         zone_index=z_idx,
                         total_zones=total_zones,
                         zone_name=zone.name,
-                        current_run=current_run,
-                        total_runs=zone.rules.num_runs,
-                        current_gen=current_gen,
-                        total_gens=zone.rules.num_generations,
+                        current_run=run_idx,
+                        total_runs=total_runs,
+                        current_gen=gen,
+                        total_gens=total_gens,
                         best_score=best_score
                     )
                     self.progress.emit(p)

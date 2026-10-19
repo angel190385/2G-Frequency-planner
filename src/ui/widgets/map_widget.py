@@ -230,8 +230,10 @@ class MapWidget(QWidget):
         self.table_zones.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table_zones.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table_zones.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_zones.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_zones.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.table_zones.setColumnWidth(4, 78)
         self.table_zones.verticalHeader().setVisible(False)
+        self.table_zones.verticalHeader().setDefaultSectionSize(34)
         self.table_zones.setStyleSheet("""
             QTableWidget {
                 background-color: #0f172a;
@@ -810,17 +812,54 @@ class MapWidget(QWidget):
             w_act = QWidget()
             l_act = QHBoxLayout(w_act)
             l_act.setContentsMargins(2, 2, 2, 2)
-            l_act.setSpacing(4)
+            l_act.setSpacing(6)
+            l_act.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            btn_cfg = QPushButton("⚙️")
+            btn_cfg = QPushButton("⚙")
             btn_cfg.setToolTip("Configurar reglas y vecindades de esta zona")
-            btn_cfg.setFixedSize(26, 26)
+            btn_cfg.setFixedSize(28, 28)
+            btn_cfg.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e293b;
+                    color: #38bdf8;
+                    border: 1px solid #0284c7;
+                    border-radius: 4px;
+                    padding: 0px;
+                    margin: 0px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    min-height: 0px;
+                    min-width: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #0284c7;
+                    color: #ffffff;
+                }
+            """)
             btn_cfg.clicked.connect(lambda _, zone=z: self._open_zone_config(zone))
             l_act.addWidget(btn_cfg)
 
-            btn_del = QPushButton("🗑️")
+            btn_del = QPushButton("🗑")
             btn_del.setToolTip("Eliminar zona")
-            btn_del.setFixedSize(26, 26)
+            btn_del.setFixedSize(28, 28)
+            btn_del.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e293b;
+                    color: #f87171;
+                    border: 1px solid #ef4444;
+                    border-radius: 4px;
+                    padding: 0px;
+                    margin: 0px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    min-height: 0px;
+                    min-width: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #ef4444;
+                    color: #ffffff;
+                }
+            """)
             btn_del.clicked.connect(lambda _, zone_idx=row: self._delete_zone(zone_idx))
             l_act.addWidget(btn_del)
 

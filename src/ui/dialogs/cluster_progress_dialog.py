@@ -20,6 +20,7 @@ class ClusterProgressDialog(QDialog):
     def __init__(self, total_zones: int, parent=None):
         super().__init__(parent)
         self.total_zones = max(1, total_zones)
+        self._completed_zones_count = 0
         self.setWindowTitle("Optimización Secuencial por Zonas")
         self.setMinimumSize(560, 440)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
@@ -55,8 +56,9 @@ class ClusterProgressDialog(QDialog):
         grp_overall = QGroupBox(f"Progreso Global ({self.total_zones} Zonas)")
         og_layout = QVBoxLayout(grp_overall)
         self.bar_overall = QProgressBar()
-        self.bar_overall.setRange(0, self.total_zones)
+        self.bar_overall.setRange(0, 100)
         self.bar_overall.setValue(0)
+        self.bar_overall.setFormat(f"0% (0/{self.total_zones} Zonas)")
         self.bar_overall.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #334155;
@@ -93,6 +95,7 @@ class ClusterProgressDialog(QDialog):
         self.bar_current = QProgressBar()
         self.bar_current.setRange(0, 100)
         self.bar_current.setValue(0)
+        self.bar_current.setFormat("0%")
         self.bar_current.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #334155;
@@ -139,22 +142,33 @@ class ClusterProgressDialog(QDialog):
         """Update live status for the active zone."""
         self.lbl_zone_title.setText(f"🚀 Optimizando Zona {p.zone_index} de {p.total_zones}: {p.zone_name}")
         self.lbl_zone_sub.setText(f"Run {p.current_run} de {p.total_runs} — Generación {p.current_gen} de {p.total_gens}")
-        self.lbl_run_gen.setText(f"Generación: {p.current_gen} / {p.total_gens} (Run {p.current_run}/{p.total_runs})")
+        self.lbl_run_gen.setText(f"Generación: {p.current_gen} / {p.total_gens} | Run: {p.current_run} / {p.total_runs}")
 
         sc_str = format_number(p.best_score)
         self.lbl_best_score.setText(f"Mejor Coste: {sc_str}")
 
-        if p.total_gens > 0:
-            pct = int((p.current_gen / p.total_gens) * 100)
-            self.bar_current.setValue(pct)
+        # Active zone progress across its runs
+        zone_total = max(1, p.total_runs * p.total_gens)
+        zone_done = (p.current_run - 1) * p.total_gens + p.current_gen
+        zone_pct = min(100, max(0, int((zone_done / zone_total) * 100)))
+        self.bar_current.setValue(zone_pct)
+        self.bar_current.setFormat(f"{zone_pct}% (Gen {p.current_gen}/{p.total_gens} - Run {p.current_run}/{p.total_runs})")
 
-        self.bar_overall.setValue(p.zone_index - 1)
+        # Smooth overall progress across all zones
+        completed_zones = p.zone_index - 1
+        zone_fraction = zone_done / zone_total
+        overall_pct = min(100, max(0, int(((completed_zones + zone_fraction) / max(1, p.total_zones)) * 100)))
+        self.bar_overall.setValue(overall_pct)
+        self.bar_overall.setFormat(f"{overall_pct}% (Zona {p.zone_index}/{p.total_zones})")
 
     def log_zone_completed(self, zone_name: str, score: float, cell_count: int):
         """Append log message when a zone finishes."""
         sc_str = format_number(score)
         self.txt_log.append(f"✅ [{zone_name}] completada: {cell_count} celdas optimizadas | Score: {sc_str}")
-        self.bar_overall.setValue(self.bar_overall.value() + 1)
+        self._completed_zones_count += 1
+        pct = min(100, int((self._completed_zones_count / max(1, self.total_zones)) * 100))
+        self.bar_overall.setValue(pct)
+        self.bar_overall.setFormat(f"{pct}% ({self._completed_zones_count}/{self.total_zones} Zonas)")
 
     def log_message(self, msg: str):
         self.txt_log.append(msg)
