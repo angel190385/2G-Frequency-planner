@@ -35,6 +35,8 @@ class ZoneOptimizationProgress:
     current_gen: int
     total_gens: int
     best_score: float
+    global_run: int = 1
+    total_global_runs: int = 1
 
 
 def find_frontier_cells(
@@ -269,6 +271,9 @@ class ClusterOptimizerThread(QThread):
             zone_results = {}
             total_zones = len(self.zones)
             sorted_zones = sorted(self.zones, key=lambda z: z.execution_order)
+            total_global_runs = sum(getattr(z.rules, "num_runs", 1) for z in sorted_zones if z.cell_ids)
+            if total_global_runs == 0:
+                total_global_runs = max(1, sum(getattr(z.rules, "num_runs", 1) for z in sorted_zones))
 
             for z_idx, zone in enumerate(sorted_zones, start=1):
                 if self.optimizer._cancelled:
@@ -313,15 +318,23 @@ class ClusterOptimizerThread(QThread):
                     else:
                         ng = NeighborGraph()
 
+                runs_before = sum(
+                    getattr(sorted_zones[i].rules, "num_runs", 1)
+                    for i in range(z_idx - 1)
+                    if sorted_zones[i].cell_ids
+                )
+
                 def on_progress(*args):
                     if len(args) == 5:
                         run_idx, total_runs, gen, total_gens, best_score = args
                     elif len(args) == 3:
                         gen, total_gens, best_score = args
                         run_idx = 1
-                        total_runs = zone.rules.num_runs
+                        total_runs = getattr(zone.rules, "num_runs", 1)
                     else:
                         return
+
+                    global_run_idx = runs_before + run_idx
 
                     p = ZoneOptimizationProgress(
                         zone_index=z_idx,
@@ -331,7 +344,9 @@ class ClusterOptimizerThread(QThread):
                         total_runs=total_runs,
                         current_gen=gen,
                         total_gens=total_gens,
-                        best_score=best_score
+                        best_score=best_score,
+                        global_run=global_run_idx,
+                        total_global_runs=total_global_runs
                     )
                     self.progress.emit(p)
 

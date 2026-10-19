@@ -93,6 +93,28 @@ class TestClusterUIEnhancements(unittest.TestCase):
         self.assertEqual(len(dlg._zone_histories), 1)
         self.assertEqual(dlg._zone_histories[1][0], [1])
         self.assertEqual(dlg._zone_histories[1][1], [90.0])
+
+        # Test exact scenario from user request: Zone 1 of 2, Run 3 of 3, Gen 44 of 500
+        p_user = ZoneOptimizationProgress(
+            zone_index=1,
+            total_zones=2,
+            zone_name="Zona 1",
+            current_run=3,
+            total_runs=3,
+            current_gen=44,
+            total_gens=500,
+            best_score=224994993.81,
+            global_run=3,
+            total_global_runs=6
+        )
+        dlg.update_progress(p_user)
+        # bar_current should strictly show generation 44 of 500 (8.8% -> 8% or 9%)
+        self.assertIn("44 / 500 Generaciones", dlg.bar_current.text())
+        self.assertEqual(dlg.bar_current.value(), int(44 / 500 * 100))
+
+        # bar_overall should show execution 3 of 6
+        self.assertIn("Ejecución 3 de 6", dlg.bar_overall.text())
+        self.assertIn("Zona 1/2", dlg.bar_overall.text())
         dlg.close()
 
     def test_map_widget_optimization_parameters(self):

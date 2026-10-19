@@ -74,8 +74,8 @@ class ClusterProgressDialog(QDialog):
         layout.addWidget(header_frame)
 
         # Overall progress
-        grp_overall = QGroupBox(f"Progreso Global ({self.total_zones} Zonas)")
-        og_layout = QVBoxLayout(grp_overall)
+        self.grp_overall = QGroupBox(f"Progreso Global ({self.total_zones} Zonas)")
+        og_layout = QVBoxLayout(self.grp_overall)
         self.bar_overall = QProgressBar()
         self.bar_overall.setRange(0, 100)
         self.bar_overall.setValue(0)
@@ -96,11 +96,11 @@ class ClusterProgressDialog(QDialog):
             }}
         """)
         og_layout.addWidget(self.bar_overall)
-        layout.addWidget(grp_overall)
+        layout.addWidget(self.grp_overall)
 
         # Current zone progress
-        grp_current = QGroupBox("Zona Activa")
-        cg_layout = QVBoxLayout(grp_current)
+        self.grp_current = QGroupBox("Zona Activa")
+        cg_layout = QVBoxLayout(self.grp_current)
 
         row_info = QHBoxLayout()
         self.lbl_run_gen = QLabel("Generación: 0 / 0 | Run: 1 / 1")
@@ -154,7 +154,7 @@ class ClusterProgressDialog(QDialog):
         cg_layout.addWidget(plot_frame)
 
         self._init_plot()
-        layout.addWidget(grp_current)
+        layout.addWidget(self.grp_current)
 
         # Log
         self.txt_log = QTextEdit()
@@ -204,19 +204,37 @@ class ClusterProgressDialog(QDialog):
         sc_str = format_number(p.best_score)
         self.lbl_best_score.setText(f"Mejor Coste: {sc_str}")
 
-        # Active zone progress across its runs
-        zone_total = max(1, p.total_runs * p.total_gens)
-        zone_done = (p.current_run - 1) * p.total_gens + p.current_gen
-        zone_pct = min(100, max(0, int((zone_done / zone_total) * 100)))
-        self.bar_current.setValue(zone_pct)
-        self.bar_current.setFormat(f"{zone_pct}% (Gen {p.current_gen}/{p.total_gens} - Run {p.current_run}/{p.total_runs})")
+        # 1. Barra de generación (debajo de Zona Activa):
+        # Muestra la generación actual sobre el total de generaciones (ej: 44 de 500)
+        gen_pct = min(100, max(0, int((p.current_gen / max(1, p.total_gens)) * 100)))
+        self.bar_current.setValue(gen_pct)
+        self.bar_current.setFormat(f"{gen_pct}% ({p.current_gen} / {p.total_gens} Generaciones)")
 
-        # Smooth overall progress across all zones
-        completed_zones = p.zone_index - 1
-        zone_fraction = zone_done / zone_total
-        overall_pct = min(100, max(0, int(((completed_zones + zone_fraction) / max(1, p.total_zones)) * 100)))
+        # 2. Barra de progreso global:
+        # Muestra la ejecución actual sobre el total de ejecuciones
+        total_exec = max(1, p.total_global_runs if p.total_global_runs > 1 else (p.total_zones * p.total_runs))
+        curr_exec = p.global_run if p.global_run >= 1 else ((p.zone_index - 1) * p.total_runs + p.current_run)
+
+        gen_fraction = p.current_gen / max(1, p.total_gens)
+        exec_done = (curr_exec - 1) + gen_fraction
+        overall_pct = min(100, max(0, int((exec_done / total_exec) * 100)))
         self.bar_overall.setValue(overall_pct)
-        self.bar_overall.setFormat(f"{overall_pct}% (Zona {p.zone_index}/{p.total_zones})")
+
+        if hasattr(self, "grp_overall"):
+            if p.total_zones > 1:
+                self.grp_overall.setTitle(f"Progreso Global ({total_exec} Ejecuciones — {p.total_zones} Zonas)")
+            else:
+                self.grp_overall.setTitle(f"Progreso Global ({total_exec} Ejecuciones)")
+
+        if hasattr(self, "grp_current"):
+            self.grp_current.setTitle(f"Zona Activa: {p.zone_name}")
+
+        if p.total_zones > 1:
+            self.bar_overall.setFormat(
+                f"{overall_pct}% (Ejecución {curr_exec} de {total_exec} — Zona {p.zone_index}/{p.total_zones}, Run {p.current_run}/{p.total_runs})"
+            )
+        else:
+            self.bar_overall.setFormat(f"{overall_pct}% (Ejecución {curr_exec} de {total_exec})")
 
         # ── Live Miniature Convergence Plot ──
         if p.zone_index != self._current_zone_index:
@@ -271,7 +289,12 @@ class ClusterProgressDialog(QDialog):
         self._completed_zones_count += 1
         pct = min(100, int((self._completed_zones_count / max(1, self.total_zones)) * 100))
         self.bar_overall.setValue(pct)
-        self.bar_overall.setFormat(f"{pct}% ({self._completed_zones_count}/{self.total_zones} Zonas)")
+        if self._completed_zones_count >= self.total_zones:
+            self.bar_overall.setFormat(f"100% (Completadas {self._completed_zones_count}/{self.total_zones} Zonas)")
+            self.bar_current.setValue(100)
+            self.bar_current.setFormat("100% (Finalizado)")
+        else:
+            self.bar_overall.setFormat(f"{pct}% ({self._completed_zones_count}/{self.total_zones} Zonas completadas)")
 
     def log_message(self, msg: str):
         self.txt_log.append(msg)
