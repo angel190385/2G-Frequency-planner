@@ -74,12 +74,13 @@ class ClusterProgressDialog(QDialog):
         layout.addWidget(header_frame)
 
         # Overall progress
-        self.grp_overall = QGroupBox(f"Progreso Global ({self.total_zones} Zonas)")
+        zona_lbl = "Zona" if self.total_zones == 1 else "Zonas"
+        self.grp_overall = QGroupBox(f"Progreso Global ({self.total_zones} {zona_lbl})")
         og_layout = QVBoxLayout(self.grp_overall)
         self.bar_overall = QProgressBar()
         self.bar_overall.setRange(0, 100)
         self.bar_overall.setValue(0)
-        self.bar_overall.setFormat(f"0% (0/{self.total_zones} Zonas)")
+        self.bar_overall.setFormat(f"0% (0 de {self.total_zones} {zona_lbl} realizadas)")
         self.bar_overall.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #334155;
@@ -211,30 +212,23 @@ class ClusterProgressDialog(QDialog):
         self.bar_current.setFormat(f"{gen_pct}% ({p.current_gen} / {p.total_gens} Generaciones)")
 
         # 2. Barra de progreso global:
-        # Muestra la ejecución actual sobre el total de ejecuciones
-        total_exec = max(1, p.total_global_runs if p.total_global_runs > 1 else (p.total_zones * p.total_runs))
-        curr_exec = p.global_run if p.global_run >= 1 else ((p.zone_index - 1) * p.total_runs + p.current_run)
-
-        gen_fraction = p.current_gen / max(1, p.total_gens)
-        exec_done = (curr_exec - 1) + gen_fraction
-        overall_pct = min(100, max(0, int((exec_done / total_exec) * 100)))
+        # Muestra el avance y las zonas realizadas sobre el total de zonas
+        zone_fraction = (p.current_run - 1 + (p.current_gen / max(1, p.total_gens))) / max(1, p.total_runs)
+        zones_progress = (p.zone_index - 1) + zone_fraction
+        overall_pct = min(100, max(0, int((zones_progress / max(1, p.total_zones)) * 100)))
         self.bar_overall.setValue(overall_pct)
 
+        zona_lbl = "Zona" if p.total_zones == 1 else "Zonas"
         if hasattr(self, "grp_overall"):
-            if p.total_zones > 1:
-                self.grp_overall.setTitle(f"Progreso Global ({total_exec} Ejecuciones — {p.total_zones} Zonas)")
-            else:
-                self.grp_overall.setTitle(f"Progreso Global ({total_exec} Ejecuciones)")
+            self.grp_overall.setTitle(f"Progreso Global ({p.total_zones} {zona_lbl})")
 
         if hasattr(self, "grp_current"):
             self.grp_current.setTitle(f"Zona Activa: {p.zone_name}")
 
-        if p.total_zones > 1:
-            self.bar_overall.setFormat(
-                f"{overall_pct}% (Ejecución {curr_exec} de {total_exec} — Zona {p.zone_index}/{p.total_zones}, Run {p.current_run}/{p.total_runs})"
-            )
-        else:
-            self.bar_overall.setFormat(f"{overall_pct}% (Ejecución {curr_exec} de {total_exec})")
+        zona_str = "Zona realizada" if p.total_zones == 1 else "Zonas realizadas"
+        self.bar_overall.setFormat(
+            f"{overall_pct}% ({self._completed_zones_count} de {p.total_zones} {zona_str})"
+        )
 
         # ── Live Miniature Convergence Plot ──
         if p.zone_index != self._current_zone_index:
@@ -292,12 +286,13 @@ class ClusterProgressDialog(QDialog):
         self._completed_zones_count += 1
         pct = min(100, int((self._completed_zones_count / max(1, self.total_zones)) * 100))
         self.bar_overall.setValue(pct)
+        zona_str = "Zona realizada" if self.total_zones == 1 else "Zonas realizadas"
         if self._completed_zones_count >= self.total_zones:
-            self.bar_overall.setFormat(f"100% (Completadas {self._completed_zones_count}/{self.total_zones} Zonas)")
+            self.bar_overall.setFormat(f"100% ({self.total_zones} de {self.total_zones} {zona_str})")
             self.bar_current.setValue(100)
             self.bar_current.setFormat("100% (Finalizado)")
         else:
-            self.bar_overall.setFormat(f"{pct}% ({self._completed_zones_count}/{self.total_zones} Zonas completadas)")
+            self.bar_overall.setFormat(f"{pct}% ({self._completed_zones_count} de {self.total_zones} {zona_str})")
 
     def log_message(self, msg: str):
         self.txt_log.append(msg)
