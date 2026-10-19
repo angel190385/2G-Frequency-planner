@@ -31,6 +31,7 @@ from src.ui.widgets.ho_table import HOTableWidget
 from src.ui.widgets.result_comparison import ResultComparisonWidget
 from src.ui.widgets.map_widget import MapWidget
 from src.ui.dialogs.import_dialog import ImportDialog
+from src.ui.dialogs.planner_import_dialog import PlannerImportDialog
 from src.ui.dialogs.rules_dialog import RulesDialog
 from src.ui.dialogs.range_adaptation_dialog import RangeAdaptationDialog
 from src.ui.dialogs.convergence_dialog import ConvergenceDialog
@@ -106,7 +107,12 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&Archivo")
 
-        act_import_cells = QAction("📊 Importar Celdas...", self)
+        act_import_planner = QAction("🌐 Importar Red Global t_Planner (Cells + Sectors)...", self)
+        act_import_planner.setShortcut("Ctrl+G")
+        act_import_planner.triggered.connect(self._open_planner_import_dialog)
+        file_menu.addAction(act_import_planner)
+
+        act_import_cells = QAction("📊 Importar Celdas (Formato Estándar)...", self)
         act_import_cells.setShortcut("Ctrl+I")
         act_import_cells.triggered.connect(lambda: self._import_data("cells"))
         file_menu.addAction(act_import_cells)
@@ -200,6 +206,7 @@ class MainWindow(QMainWindow):
 
         # ── Tab 5: Interactive Map ────────────────────────────────
         self.map_widget = MapWidget()
+        self.map_widget.cluster_optimization_completed.connect(self._on_cluster_optimization_completed)
         self.tabs.addTab(self.map_widget, "🗺️ Mapa de Frecuencias")
 
         main_layout.addWidget(self.tabs)
@@ -727,6 +734,65 @@ class MainWindow(QMainWindow):
                 self, "Error de importación",
                 f"Error procesando el archivo:\n\n{str(e)}"
             )
+
+    def _open_planner_import_dialog(self):
+        """Open dialog to import global network exports from t_Planner."""
+        dlg = PlannerImportDialog(self)
+        if dlg.exec() == PlannerImportDialog.DialogCode.Accepted:
+            self.cells = dlg.imported_cells
+            self.stations = dlg.imported_stations
+            self.cell_table.load_cells(self.cells)
+            self._update_calc_table()
+            self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+            self.status_label.setText(
+                f"Red t_Planner importada: {len(self.cells)} celdas en {len(self.stations)} estaciones"
+            )
+            self._update_status()
+            # Switch to map tab automatically so the user can see the network and trace zones
+            self.tabs.setCurrentWidget(self.map_widget)
+
+    def _on_cluster_optimization_completed(self, zone_results: dict, updated_cells: dict):
+        """Handle completion of sequential cluster/zone optimization."""
+        self.cells = updated_cells
+        self.cell_table.load_cells(self.cells)
+        self._update_calc_table()
+
+        # Evaluate the consolidated global plan
+        from src.engine.cost_function import evaluate_plan
+        from src.models.frequency_plan import FrequencyAssignment, OptimizationResultList
+        from src.io.auto_export import export_execution_bundle
+
+        assignments = {}
+        for cid, cell in self.cells.items():
+            assignments[cid] = FrequencyAssignment(
+                cell_id=cid,
+                bcch=cell.bcch or 0,
+                tch_list=list(cell.tch_list)
+            )
+
+        consolidated_plan = evaluate_plan(
+            assignments=assignments,
+            cells=self.cells,
+            neighbor_graph=self.neighbor_graph,
+            rules=self.rules,
+            plan_id=1,
+            run_id=1
+        )
+
+        res_list = OptimizationResultList([consolidated_plan], per_run={1: [consolidated_plan]})
+        self.results = res_list
+        self.result_widget.load_results(res_list, self.cells, self.neighbor_graph, self.rules)
+        self.map_widget.load_data(self.cells, self.results, self.neighbor_graph, self.rules)
+
+        try:
+            export_execution_bundle(
+                cells=self.cells,
+                neighbor_graph=self.neighbor_graph,
+                rules=self.rules,
+                results=res_list
+            )
+        except Exception as e:
+            print("Error exporting cluster bundle:", e)
 
     def _open_rules_dialog(self):
         """Open the rules configuration dialog."""
