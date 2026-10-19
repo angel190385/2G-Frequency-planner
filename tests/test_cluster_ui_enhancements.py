@@ -54,17 +54,19 @@ class TestClusterUIEnhancements(unittest.TestCase):
             zone_name="Zona 1",
             current_run=1,
             total_runs=2,
-            current_gen=2,
+            current_gen=10,
             total_gens=10,
             best_score=120.0
         )
         dlg.update_progress(p2)
-        self.assertEqual(dlg._zone_histories[1][0], [1, 2])
+        self.assertEqual(dlg._zone_histories[1][0], [1, 10])
         self.assertEqual(dlg._zone_histories[1][1], [150.0, 120.0])
-        self.assertEqual(dlg.bar_current.value(), 10)
-        self.assertIn("2 / 20 Generaciones", dlg.bar_current.text())
+        self.assertEqual(dlg.bar_current.value(), 50)
+        self.assertIn("10 / 20 Iteraciones", dlg.bar_current.text())
+        self.assertEqual(dlg.lbl_run_gen.text(), "Iteración: 10 / 20")
+        self.assertNotIn("Run actual:", dlg.lbl_run_gen.text())
 
-        # Run 2 of Zone 1: cumulative generation = 10 + 1 = 11 of 20 (55%)
+        # Run 2 of Zone 1: Run 1 reached 10, Run 2 starts at 1 -> sum = 10 + 1 = 11 of 20 (55%)
         p3 = ZoneOptimizationProgress(
             zone_index=1,
             total_zones=2,
@@ -79,7 +81,9 @@ class TestClusterUIEnhancements(unittest.TestCase):
         self.assertIn(2, dlg._lines)
         self.assertEqual(dlg._zone_histories[2][0], [1])
         self.assertEqual(dlg.bar_current.value(), 55)
-        self.assertIn("11 / 20 Generaciones", dlg.bar_current.text())
+        self.assertIn("11 / 20 Iteraciones", dlg.bar_current.text())
+        self.assertEqual(dlg.lbl_run_gen.text(), "Iteración: 11 / 20")
+        self.assertNotIn("Run actual:", dlg.lbl_run_gen.text())
         # Run 1 is still better (120 < 140) -> color remains RUN_COLORS[0] (#00d4aa)
         self.assertIn("#00d4aa", dlg.bar_current.styleSheet())
 
@@ -96,7 +100,9 @@ class TestClusterUIEnhancements(unittest.TestCase):
         )
         dlg.update_progress(p3_better)
         self.assertEqual(dlg.bar_current.value(), 60)
-        self.assertIn("12 / 20 Generaciones", dlg.bar_current.text())
+        self.assertIn("12 / 20 Iteraciones", dlg.bar_current.text())
+        self.assertEqual(dlg.lbl_run_gen.text(), "Iteración: 12 / 20")
+        self.assertNotIn("Run actual:", dlg.lbl_run_gen.text())
         self.assertIn("#38bdf8", dlg.bar_current.styleSheet())
         self.assertIn("(Run 2)", dlg.lbl_best_score.text())
 
@@ -117,7 +123,31 @@ class TestClusterUIEnhancements(unittest.TestCase):
         self.assertEqual(dlg._zone_histories[1][0], [1])
         self.assertEqual(dlg._zone_histories[1][1], [90.0])
 
-        # Test cumulative scenario across runs: Zone 1 of 2, Run 3 of 3, Gen 44 of 500
+        # Test cumulative scenario across runs: Zone 1 with Run 1 at 500, Run 2 at 500, Run 3 at 44
+        p_r1 = ZoneOptimizationProgress(
+            zone_index=1,
+            total_zones=2,
+            zone_name="Zona 1",
+            current_run=1,
+            total_runs=3,
+            current_gen=500,
+            total_gens=500,
+            best_score=250000000.0,
+        )
+        dlg.update_progress(p_r1)
+
+        p_r2 = ZoneOptimizationProgress(
+            zone_index=1,
+            total_zones=2,
+            zone_name="Zona 1",
+            current_run=2,
+            total_runs=3,
+            current_gen=500,
+            total_gens=500,
+            best_score=240000000.0,
+        )
+        dlg.update_progress(p_r2)
+
         p_user = ZoneOptimizationProgress(
             zone_index=1,
             total_zones=2,
@@ -131,9 +161,11 @@ class TestClusterUIEnhancements(unittest.TestCase):
             total_global_runs=6
         )
         dlg.update_progress(p_user)
-        # Total gens = 3 * 500 = 1500. Cumulative = (3 - 1)*500 + 44 = 1044 of 1500 (69%)
-        self.assertIn("1044 / 1500 Generaciones", dlg.bar_current.text())
+        # Total gens = 3 * 500 = 1500. Sum = 500 + 500 + 44 = 1044 of 1500 (69%)
+        self.assertIn("1044 / 1500 Iteraciones", dlg.bar_current.text())
         self.assertEqual(dlg.bar_current.value(), int(1044 / 1500 * 100))
+        self.assertEqual(dlg.lbl_run_gen.text(), "Iteración: 1044 / 1500")
+        self.assertNotIn("Run actual:", dlg.lbl_run_gen.text())
 
         # bar_overall should strictly show percentage and count of analyzed zones (ratio)
         self.assertEqual(dlg.bar_overall.value(), 0)

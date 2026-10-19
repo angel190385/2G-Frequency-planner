@@ -42,6 +42,7 @@ class ClusterProgressDialog(QDialog):
         self._zone_histories: dict[int, tuple[list[int], list[float]]] = {}
         self._lines: dict[int, object] = {}
         self._run_best_scores: dict[int, float] = {}
+        self._run_current_gens: dict[int, int] = {}
         self._current_best_run_id: int | None = None
         self.setWindowTitle("Optimización Secuencial por Zonas")
         self.setMinimumSize(640, 560)
@@ -107,7 +108,7 @@ class ClusterProgressDialog(QDialog):
         cg_layout = QVBoxLayout(self.grp_current)
 
         row_info = QHBoxLayout()
-        self.lbl_run_gen = QLabel("Generación: 0 / 0 | Run: 1 / 1")
+        self.lbl_run_gen = QLabel("Iteración: 0 / 0")
         self.lbl_run_gen.setStyleSheet("color: #e0e0e8; font-weight: 500;")
         row_info.addWidget(self.lbl_run_gen)
 
@@ -207,6 +208,7 @@ class ClusterProgressDialog(QDialog):
             self._zone_histories.clear()
             self._lines.clear()
             self._run_best_scores.clear()
+            self._run_current_gens.clear()
             self._current_best_run_id = None
             self.ax.cla()
             self.ax.set_facecolor("#070d19")
@@ -218,32 +220,30 @@ class ClusterProgressDialog(QDialog):
             for spine in self.ax.spines.values():
                 spine.set_color("#1e293b")
 
-        # Track best score per run
+        # Track best score and current generation per run
         if p.current_run not in self._run_best_scores or p.best_score < self._run_best_scores[p.current_run]:
             self._run_best_scores[p.current_run] = p.best_score
+        self._run_current_gens[p.current_run] = p.current_gen
 
         # Identify which run is currently performing best (lowest cost)
         best_run_id = min(self._run_best_scores.keys(), key=lambda r: self._run_best_scores[r])
         best_run_score = self._run_best_scores[best_run_id]
         best_color = RUN_COLORS[(best_run_id - 1) % len(RUN_COLORS)]
 
-        # 1. Barra de generación acumulada (debajo de Zona Activa):
-        # Suma las generaciones de los runs configurados para mostrar el progreso continuo total
+        # 1. Barra de iteraciones acumulada (debajo de Zona Activa):
+        # Suma de las iteraciones de todos los runs sobre el total de iteraciones
         total_zone_gens = max(1, p.total_runs * p.total_gens)
-        cumulative_gen = min(total_zone_gens, (p.current_run - 1) * p.total_gens + p.current_gen)
-        gen_pct = min(100, max(0, int((cumulative_gen / total_zone_gens) * 100)))
+        completed_gens = min(total_zone_gens, sum(self._run_current_gens.values()))
+        gen_pct = min(100, max(0, int((completed_gens / total_zone_gens) * 100)))
 
         self.lbl_zone_title.setText(f"🚀 Optimizando Zona {p.zone_index} de {p.total_zones}: {p.zone_name}")
+        self.lbl_zone_sub.setText(f"Iteración {completed_gens} de {total_zone_gens}")
+        self.lbl_run_gen.setText(f"Iteración: {completed_gens} / {total_zone_gens}")
         if p.total_runs > 1:
-            self.lbl_zone_sub.setText(f"Run {p.current_run} de {p.total_runs} (Gen {p.current_gen}/{p.total_gens}) — Acumulado: {cumulative_gen}/{total_zone_gens}")
-            self.lbl_run_gen.setText(f"Generación: {cumulative_gen} / {total_zone_gens} | Run actual: {p.current_run} / {p.total_runs}")
             self.lbl_best_score.setText(f"Mejor Coste: {format_number(best_run_score)} (Run {best_run_id})")
-            self.bar_current.setFormat(f"{gen_pct}% ({cumulative_gen} / {total_zone_gens} Generaciones)")
         else:
-            self.lbl_zone_sub.setText(f"Generación {p.current_gen} de {p.total_gens}")
-            self.lbl_run_gen.setText(f"Generación: {p.current_gen} / {p.total_gens}")
             self.lbl_best_score.setText(f"Mejor Coste: {format_number(best_run_score)}")
-            self.bar_current.setFormat(f"{gen_pct}% ({p.current_gen} / {p.total_gens} Generaciones)")
+        self.bar_current.setFormat(f"{gen_pct}% ({completed_gens} / {total_zone_gens} Iteraciones)")
 
         self.lbl_best_score.setStyleSheet(f"color: {best_color}; font-weight: bold; font-size: 13px;")
         self.bar_current.setValue(gen_pct)
