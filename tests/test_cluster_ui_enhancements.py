@@ -205,7 +205,57 @@ class TestClusterUIEnhancements(unittest.TestCase):
         map_w.spin_runs.setValue(5)
         self.assertEqual(z.rules.num_runs, 5)
 
+        # Check neighbor relations checkbox in zones mode
+        self.assertTrue(hasattr(map_w, "chk_show_neighbors"))
+        self.assertFalse(map_w.chk_show_neighbors.isChecked())  # Must default to False
+
         map_w.close()
+
+    def test_map_widget_zones_neighbor_lines_toggle(self):
+        """Test that in zones mode neighbor relations are hidden by default and shown when checked."""
+        map_w = MapWidget(mode="zones")
+        st1 = Station("S1", "Site 1", 40.0, -3.0)
+        st2 = Station("S2", "Site 2", 40.1, -3.1)
+        c1 = Cell("C1", st1, 1, bcch=50, tch_list=[52])
+        c2 = Cell("C2", st2, 1, bcch=50, tch_list=[54]) # Co-channel
+        cells = {"C1": c1, "C2": c2}
+
+        from src.models.neighbor import NeighborGraph, NeighborRelation
+        ng = NeighborGraph()
+        ng.add_relation(NeighborRelation("C1", "C2", ho_count=20, distance_km=2.0))
+
+        map_w.load_data(cells, results=None, neighbor_graph=ng)
+
+        # By default chk_show_neighbors is False
+        self.assertFalse(map_w.chk_show_neighbors.isChecked())
+
+        # Mock web_view to intercept js_code sent to updateMapData
+        captured_payloads = []
+        original_run_js = map_w.web_view.page().runJavaScript
+        def mock_run_js(code):
+            if "updateMapData(" in code:
+                prefix = "updateMapData("
+                raw_json = code[code.index(prefix) + len(prefix):-2]
+                import json
+                captured_payloads.append(json.loads(raw_json))
+        map_w.web_view.page().runJavaScript = mock_run_js
+
+        try:
+            # 1. Unchecked (default): conflicts/relations must be empty
+            map_w._refresh_map()
+            self.assertEqual(len(captured_payloads), 1)
+            self.assertEqual(len(captured_payloads[-1]["conflicts"]), 0)
+
+            # 2. Checked: conflicts/relations must be rendered
+            map_w.chk_show_neighbors.setChecked(True)
+            self.assertGreater(len(captured_payloads[-1]["conflicts"]), 0)
+
+            # 3. Unchecked again: cleared
+            map_w.chk_show_neighbors.setChecked(False)
+            self.assertEqual(len(captured_payloads[-1]["conflicts"]), 0)
+        finally:
+            map_w.web_view.page().runJavaScript = original_run_js
+            map_w.close()
 
     def test_calc_table_zona_column_and_sync(self):
         """Test calculation table with Zona column and polygon synchronization."""

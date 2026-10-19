@@ -122,6 +122,10 @@ class MapWidget(QWidget):
         self.chk_isolate_cell.setChecked(False)
         self.chk_isolate_cell.toggled.connect(self._on_isolate_cell_toggled)
 
+        self.chk_show_neighbors = QCheckBox("🔗 Mostrar relaciones de vecindad")
+        self.chk_show_neighbors.setChecked(False)
+        self.chk_show_neighbors.toggled.connect(self._on_filter_changed)
+
         btn_center = QPushButton("🎯 Centrar Mapa")
         btn_center.clicked.connect(self._reset_map_view)
 
@@ -136,6 +140,7 @@ class MapWidget(QWidget):
             ctrl_layout.addWidget(self.combo_freq)
             ctrl_layout.addWidget(QLabel("Buscar Celda:"))
             ctrl_layout.addWidget(self.combo_cell)
+            ctrl_layout.addWidget(self.chk_show_neighbors)
             ctrl_layout.addStretch()
             ctrl_layout.addWidget(btn_center)
             left_layout.addWidget(ctrl_box)
@@ -582,12 +587,14 @@ class MapWidget(QWidget):
 
         function drawConflictLine(lat1, lon1, lat2, lon2, type, text) {{
             var isCo = (type === 'cochannel');
-            var color = isCo ? '#ef4444' : '#f97316';
+            var isAdj = (type === 'adjacent');
+            var isNeighbor = (type === 'neighbor');
+            var color = isCo ? '#ef4444' : (isAdj ? '#f97316' : '#38bdf8');
             var line = L.polyline([[lat1, lon1], [lat2, lon2]], {{
                 color: color,
-                weight: isCo ? 3.5 : 2.5,
-                opacity: 0.9,
-                dashArray: isCo ? null : '6, 6'
+                weight: isCo ? 3.5 : (isAdj ? 2.5 : 1.5),
+                opacity: isNeighbor ? 0.65 : 0.9,
+                dashArray: isCo ? null : (isAdj ? '6, 6' : '4, 4')
             }});
 
             line.bindTooltip(escapeHtml(text), {{sticky: true, className: 'conflict-tooltip'}});
@@ -1272,39 +1279,75 @@ class MapWidget(QWidget):
             })
 
         conflict_objs = []
-        if conflict_mode != "none" and plan_res and plan_res.violations:
-            for v in plan_res.violations:
-                if conflict_mode == "cochannel" and v.violation_type != "cochannel":
-                    continue
-                if conflict_mode == "adjacent" and v.violation_type != "adjacent":
-                    continue
+        show_lines = True
+        if self.mode == "zones":
+            show_lines = self.chk_show_neighbors.isChecked()
+        elif conflict_mode == "none":
+            show_lines = False
 
-                cell_a = self.cells.get(v.cell_a_id)
-                cell_b = self.cells.get(v.cell_b_id)
-                if not cell_a or not cell_b or not cell_a.station or not cell_b.station:
-                    continue
-
-                if self.chk_only_modified.isChecked():
-                    if cell_a.cell_id not in modified_cids and cell_b.cell_id not in modified_cids:
+        if show_lines:
+            added_pairs = set()
+            if plan_res and plan_res.violations and conflict_mode != "none":
+                for v in plan_res.violations:
+                    if conflict_mode == "cochannel" and v.violation_type != "cochannel":
+                        continue
+                    if conflict_mode == "adjacent" and v.violation_type != "adjacent":
                         continue
 
-                if target_freq is not None and target_freq > 0:
-                    if v.freq_a != target_freq and v.freq_b != target_freq:
+                    cell_a = self.cells.get(v.cell_a_id)
+                    cell_b = self.cells.get(v.cell_b_id)
+                    if not cell_a or not cell_b or not cell_a.station or not cell_b.station:
                         continue
 
-                text = (f"⚠️ {v.violation_type.upper()}: {v.cell_a_id} ({v.channel_type_a} {v.freq_a}) ↔ "
-                        f"{v.cell_b_id} ({v.channel_type_b} {v.freq_b})")
+                    if self.chk_only_modified.isChecked():
+                        if cell_a.cell_id not in modified_cids and cell_b.cell_id not in modified_cids:
+                            continue
 
-                conflict_objs.append({
-                    "lat1": cell_a.station.latitude,
-                    "lon1": cell_a.station.longitude,
-                    "lat2": cell_b.station.latitude,
-                    "lon2": cell_b.station.longitude,
-                    "cell_a_id": cell_a.cell_id,
-                    "cell_b_id": cell_b.cell_id,
-                    "type": v.violation_type,
-                    "text": text
-                })
+                    if target_freq is not None and target_freq > 0:
+                        if v.freq_a != target_freq and v.freq_b != target_freq:
+                            continue
+
+                    pair_key = tuple(sorted((cell_a.cell_id, cell_b.cell_id)))
+                    added_pairs.add(pair_key)
+
+                    text = (f"⚠️ {v.violation_type.upper()}: {v.cell_a_id} ({v.channel_type_a} {v.freq_a}) ↔ "
+                            f"{v.cell_b_id} ({v.channel_type_b} {v.freq_b})")
+
+                    conflict_objs.append({
+                        "lat1": cell_a.station.latitude,
+                        "lon1": cell_a.station.longitude,
+                        "lat2": cell_b.station.latitude,
+                        "lon2": cell_b.station.longitude,
+                        "cell_a_id": cell_a.cell_id,
+                        "cell_b_id": cell_b.cell_id,
+                        "type": v.violation_type,
+                        "text": text
+                    })
+
+            # In zones mode, if neighbor_graph exists and the checkbox is checked,
+            # also include any non-conflicting neighbor relations so all relations can be seen
+            if self.mode == "zones" and self.neighbor_graph:
+                for rel in self.neighbor_graph.all_relations():
+                    pair_key = tuple(sorted((rel.cell_a_id, rel.cell_b_id)))
+                    if pair_key in added_pairs:
+                        continue
+                    cell_a = self.cells.get(rel.cell_a_id)
+                    cell_b = self.cells.get(rel.cell_b_id)
+                    if not cell_a or not cell_b or not cell_a.station or not cell_b.station:
+                        continue
+                    added_pairs.add(pair_key)
+                    ho_str = f", HO: {rel.ho_count}" if rel.ho_count is not None else ""
+                    text = f"🔗 Vecindad: {rel.cell_a_id} ↔ {rel.cell_b_id} ({rel.distance_km:.2f} km{ho_str})"
+                    conflict_objs.append({
+                        "lat1": cell_a.station.latitude,
+                        "lon1": cell_a.station.longitude,
+                        "lat2": cell_b.station.latitude,
+                        "lon2": cell_b.station.longitude,
+                        "cell_a_id": cell_a.cell_id,
+                        "cell_b_id": cell_b.cell_id,
+                        "type": "neighbor",
+                        "text": text
+                    })
 
         payload = {
             "cells": cell_objs,
