@@ -64,6 +64,57 @@ class TestPlannerImporter(unittest.TestCase):
         self.assertEqual(c2.bcch, 103)
         self.assertEqual(c2.tch_list, [105, 107, 109])
 
+    def test_planner_import_prioritizes_cellname_over_cellid(self):
+        """
+        Verify that when planner export contains BOTH 'Cellid' and 'CellName',
+        the importer strictly picks 'CellName' and does NOT pick 'Cellid'.
+        """
+        csv_content = (
+            "Cellid;MNC;Tech;Band;Status;SiteId;SiteName;WGS84_LAT_DEC;WGS84_LON_DEC;CellName;BCCH;TCHs\n"
+            "999888;1;2G;900;In Service;SITE009;Estacion Test;40.4168;-3.7038;MAD0091;102;104,106\n"
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".csv", encoding="utf-8") as f:
+            f.write(csv_content)
+            temp_path = f.name
+
+        try:
+            cells, stations, stats = load_planner_global_cells(temp_path)
+            self.assertEqual(len(cells), 1)
+            # Must be keyed by CellName ('MAD0091'), NOT by numeric Cellid ('999888')
+            self.assertIn("MAD0091", cells)
+            self.assertNotIn("999888", cells)
+            self.assertEqual(cells["MAD0091"].cell_id, "MAD0091")
+            self.assertEqual(cells["MAD0091"].sector, "1")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_data_loader_supports_cellname_header(self):
+        """
+        Verify that load_cells correctly recognizes the 'CellName' header
+        and does not treat 'CellName' as a TCH column.
+        """
+        from src.io.data_loader import load_cells
+
+        csv_content = (
+            "station_id;station_name;lat;lon;CellName;sector;azimuth;bcch;tch1;tch2\n"
+            "EST01;Estacion;40.4168;-3.7038;EST01A;A;0;100;102;104\n"
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".csv", encoding="utf-8") as f:
+            f.write(csv_content)
+            temp_path = f.name
+
+        try:
+            cells, stations, warnings = load_cells(temp_path)
+            self.assertIn("EST01A", cells)
+            c = cells["EST01A"]
+            self.assertEqual(c.cell_id, "EST01A")
+            self.assertEqual(c.bcch, 100)
+            self.assertEqual(c.tch_list, [102, 104])
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

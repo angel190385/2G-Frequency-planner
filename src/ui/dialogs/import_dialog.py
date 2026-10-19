@@ -39,7 +39,7 @@ class ImportDialog(QDialog):
                 "  station_name - Nombre de la estación\n"
                 "  lat          - Latitud\n"
                 "  lon          - Longitud\n"
-                "  cell_id      - Identificador de la celda\n"
+                "  CellName     - Nombre de la celda (CellName)\n"
                 "  sector       - Sector (A, B, C...)\n"
                 "  azimuth      - Azimut en grados (0..360)\n"
                 "  bcch         - Frecuencia BCCH\n"
@@ -49,15 +49,15 @@ class ImportDialog(QDialog):
             ),
             "neighbors": (
                 "Archivo CSV o Excel con las siguientes columnas:\n\n"
-                "  cell_a  - Cell ID de la primera celda\n"
-                "  cell_b  - Cell ID de la segunda celda\n\n"
+                "  cell_a  - CellName de la primera celda\n"
+                "  cell_b  - CellName de la segunda celda\n\n"
                 "Las distancias se calculan automáticamente\n"
                 "a partir de las coordenadas de las estaciones."
             ),
             "handovers": (
                 "Archivo CSV o Excel con las siguientes columnas:\n\n"
-                "  cell_a    - Cell ID de la primera celda\n"
-                "  cell_b    - Cell ID de la segunda celda\n"
+                "  cell_a    - CellName de la primera celda\n"
+                "  cell_b    - CellName de la segunda celda\n"
                 "  ho_count  - Número de handovers\n\n"
                 "Solo se actualizan vecindades ya definidas.\n"
                 "⚠ Requiere cargar vecindades previamente."

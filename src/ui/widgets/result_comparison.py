@@ -219,7 +219,7 @@ class SingleRunResultWidget(QWidget):
     def _show_assignments(self, result: PlanResult):
         self.assign_table.clear()
 
-        columns = ["Cell ID", "Estación", "Sector",
+        columns = ["CellName", "Estación", "Sector",
                     "BCCH Antes", "BCCH Después", "Cambio",
                     "TCH Antes", "TCH Después"]
         self.assign_table.setColumnCount(len(columns))

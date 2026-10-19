@@ -74,7 +74,7 @@ class CellTableWidget(QWidget):
         max_tch = max((len(c.tch_list) for c in cells.values()), default=0)
 
         # Setup columns
-        base_cols = ["Estación", "Nombre Est.", "Sector", "Cell ID",
+        base_cols = ["Estación", "Nombre Est.", "Sector", "CellName",
                       "Lat", "Lon", "BCCH"]
         tch_cols = [f"TCH{i+1}" for i in range(max_tch)]
         all_cols = base_cols + tch_cols

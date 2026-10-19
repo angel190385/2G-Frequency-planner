@@ -116,7 +116,7 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
     tch_columns = []
     for k in sample_keys:
         kl = k.lower().strip()
-        if kl in ('cell_id', 'station_id', 'station_name', 'lat', 'lon', 'sector', 'azimuth', 'azimut', 'bcch'):
+        if kl in ('cellname', 'cell_name', 'cell_id', 'cellid', 'station_id', 'station_name', 'lat', 'lon', 'sector', 'azimuth', 'azimut', 'bcch'):
             continue
         if (kl.startswith('tch') or kl.startswith('trx') or
             'tch' in kl or 'trx' in kl or
@@ -131,7 +131,27 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
             station_name = row.get('station_name', station_id).strip()
             lat = _parse_float(row.get('lat', '0'))
             lon = _parse_float(row.get('lon', '0'))
-            cell_id = row.get('cell_id', '').strip()
+
+            # Prioritize CellName over legacy cell_id; never pick Cellid if CellName is present
+            cell_id = ""
+            for key_candidate in ('CellName', 'cellname', 'cell_name', 'cell_id', 'Cell_ID'):
+                val = row.get(key_candidate, '').strip()
+                if val:
+                    cell_id = val
+                    break
+            if not cell_id:
+                # Case-insensitive lookup for CellName first
+                for k, v in row.items():
+                    if k.lower().replace('_', '') == 'cellname' and v.strip():
+                        cell_id = v.strip()
+                        break
+            if not cell_id:
+                # Fallback to cell_id only if CellName was not provided at all
+                for k, v in row.items():
+                    if k.lower().replace('_', '') in ('cellid', 'idcelda') and v.strip():
+                        cell_id = v.strip()
+                        break
+
             sector = row.get('sector', '').strip()
             bcch = _parse_int(row.get('bcch', ''))
             azimuth_val = row.get('azimuth', row.get('azimut', '')).strip()
@@ -152,7 +172,7 @@ def load_cells(file_path: str) -> tuple[dict[str, Cell], dict[str, Station], lis
                     azimuth = 0.0
 
             if not cell_id:
-                warnings.append(f"Fila {i}: cell_id vacío, ignorada")
+                warnings.append(f"Fila {i}: CellName vacío, ignorada")
                 continue
 
             if not station_id:
@@ -318,7 +338,7 @@ def export_results(file_path: str, results: list, cells: dict[str, Cell]):
         writer = csv.writer(f, delimiter=';')
 
         writer.writerow([
-            'Plan', 'Score', 'Cell_ID', 'Station', 'Sector',
+            'Plan', 'Score', 'CellName', 'Station', 'Sector',
             'BCCH_Antes', 'BCCH_Después',
             'TCH_Antes', 'TCH_Después',
             'Cochan_BCCH', 'Cochan_TCH',

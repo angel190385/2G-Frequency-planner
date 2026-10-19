@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
     COL_RECALC = 0
     COL_ZONE = 1
     COL_CELL_ID = 2
+    COL_CELLNAME = 2
     COL_STATION = 3
     COL_SECTOR = 4
     COL_BCCH = 5
@@ -294,7 +295,7 @@ class MainWindow(QMainWindow):
         self.calc_table.verticalHeader().setVisible(False)
         self.calc_table.horizontalHeader().setStretchLastSection(True)
 
-        columns = ["Recalc", "Zona", "Cell ID", "Estación", "Sector",
+        columns = ["Recalc", "Zona", "CellName", "Estación", "Sector",
                    "BCCH", "Recalc BCCH", "TCH actuales",
                    "TCH a recalcular", "Nuevos TCH"]
         self.calc_table.setColumnCount(len(columns))

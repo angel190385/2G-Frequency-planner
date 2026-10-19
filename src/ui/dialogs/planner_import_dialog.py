@@ -45,7 +45,7 @@ class PlannerImportDialog(QDialog):
             "Mapeo de atributos:\n"
             "  • SiteId → station_id, SiteName → station_name\n"
             "  • WGS84_LAT_DEC, WGS84_LON_DEC → Coordenadas\n"
-            "  • CellName → cell_id\n"
+            "  • CellName → Nombre de la celda (se prioriza siempre CellName y se ignora Cellid)\n"
             "  • Último dígito numérico de CellName → sector\n"
             "  • BCCH → bcch, TCHs (separados por coma) → tch1, tch2...\n"
             "  • SectorAzimuth (primer match de sectors) → azimut de antena"

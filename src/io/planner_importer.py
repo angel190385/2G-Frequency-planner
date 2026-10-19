@@ -104,7 +104,7 @@ def load_planner_sectors(sectors_file_path: str) -> dict[str, float]:
         for i, h in enumerate(headers):
             if 'azimuth' in h:
                 idx_azimuth = i
-            elif 'cellname' in h or h == 'cell':
+            elif h in ('cellname', 'cell_name') or h.startswith('cellname'):
                 idx_cell = i
             elif 'siteid' in h or h == 'site':
                 idx_site = i
@@ -157,7 +157,7 @@ def load_planner_global_cells(
     
     Filters:
     - MNC == 1 (or '01')
-    - Tech == '2G'
+    - Tech == 2G
     - Band == 900 (or 'GSM900', 'EGSM', 'PGSM')
     - Status == 'In Service' (case-insensitive)
 
@@ -198,7 +198,13 @@ def load_planner_global_cells(
         header_norm = [_normalize_key(h) for h in raw_headers]
         col_map: dict[str, int] = {}
 
-        # Match columns flexibly
+        # 1. Prioritize CellName specifically: NEVER pick Cellid
+        for i, h in enumerate(header_norm):
+            if h in ('cellname', 'cell_name') or h.startswith('cellname'):
+                col_map['cellname'] = i
+                break
+
+        # 2. Match other columns flexibly
         for i, h in enumerate(header_norm):
             if h in ('mnc',):
                 col_map['mnc'] = i
@@ -210,20 +216,18 @@ def load_planner_global_cells(
                 col_map['status'] = i
             elif h in ('siteid', 'site', 'stationid'):
                 col_map['siteid'] = i
-            elif h in ('sitename', 'sitename', 'stationname'):
+            elif h in ('sitename', 'stationname'):
                 col_map['sitename'] = i
             elif 'lat' in h and ('dec' in h or 'wgs' in h or h == 'lat'):
                 col_map['lat'] = i
             elif 'lon' in h and ('dec' in h or 'wgs' in h or h == 'lon'):
                 col_map['lon'] = i
-            elif h in ('cellname', 'cellid', 'cell'):
-                col_map['cellname'] = i
             elif h in ('bcch', 'bcchfreq', 'arfcn'):
                 col_map['bcch'] = i
             elif h in ('tchs', 'tch', 'trxs', 'trx'):
                 col_map['tchs'] = i
 
-        # Fallbacks if some headers differ slightly
+        # Fallbacks if some headers differ slightly (strictly looking for CellName, never Cellid)
         for i, raw_h in enumerate(raw_headers):
             k = raw_h.strip().lower()
             if 'siteid' in k and 'siteid' not in col_map:

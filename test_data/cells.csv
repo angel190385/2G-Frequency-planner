@@ -1,4 +1,4 @@
-station_id;station_name;lat;lon;cell_id;sector;azimuth;bcch;tch1;tch2;tch3;tch4;tch5
+station_id;station_name;lat;lon;CellName;sector;azimuth;bcch;tch1;tch2;tch3;tch4;tch5
 EST001;Centro;40.4168;-3.7038;EST001A;A;0;100;102;104;106;108;110
 EST001;Centro;40.4168;-3.7038;EST001B;B;120;112;114;116;118;;
 EST001;Centro;40.4168;-3.7038;EST001C;C;240;120;122;124;;;
